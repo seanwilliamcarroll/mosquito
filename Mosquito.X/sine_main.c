@@ -23,6 +23,17 @@
 #define INCR_CONST 214748.365 // INCR = F_OUT * INCR_CONST
 #define ISR_1_MS (SAMP_FREQ/1000) // 1 ms in ISR Ticks
 
+// === the fixed point macros ========================================
+typedef signed int fix16 ;
+#define multfix16(a,b) ((fix16)(((( signed long long)(a))*(( signed long long)(b)))>>16)) //multiply two fixed 16:16
+#define float2fix16(a) ((fix16)((a)*65536.0)) // 2^16
+#define fix2float16(a) ((float)(a)/65536.0)
+#define fix2int16(a)   ((int)((a)>>16))
+#define int2fix16(a)   ((fix16)((a)<<16))
+#define divfix16(a,b)  ((fix16)((((signed long long)(a)<<16)/(b)))) 
+#define sqrtfix16(a)    (float2fix16(sqrt(fix2float16(a)))) 
+#define absfix16(a)      abs(a)
+
 // == SPI Stuff ==========================================================
 volatile unsigned int DAC_data ;// output value
 volatile SpiChannel spiChn = SPI_CHANNEL2 ;	// the SPI channel to use
@@ -35,6 +46,7 @@ unsigned short sineTable[TABLE_SIZE];
 volatile unsigned int phase[HARMONICS], incr[HARMONICS];
 static unsigned int amplitude[HARMONICS];
 volatile unsigned int value = 0, counter = 0;
+volatile unsigned char filterAmp = 64;
 
 // == TFT Stuff ==========================================================
 // string buffer
@@ -100,6 +112,7 @@ void initTimers(void){
     
 }
 
+
 // from Tahmid's blog
 void __ISR(_TIMER_2_VECTOR, ipl2) T2Int(void){
     unsigned int i = 0;
@@ -126,14 +139,23 @@ void __ISR(_TIMER_2_VECTOR, ipl2) T2Int(void){
 //        value = 2047;
 //    }
     value = 0;
-    counter++;
+//    counter++;
     for(i=0; i < HARMONICS; i++){
         phase[i] = phase[i] + incr[i];
         value = value + ((amplitude[i] * sineTable[phase[i] >> 24])/10000);
     }
+    // rand low pass filter
+    // FILT <-- FILT + FF(NEW - FILT)
+    filterAmp = filterAmp + ((rand() & 0x3F - filterAmp) >> 3);
+//    filterAmp = rand() & 0xfff;
+    //filterAmp = filterAmp / 0x1FFFE;
+    value = value - 2047;
+    value = filterAmp * value;
+    value = value / 0x7F;
+    value = value + 2047;
     
-    writeDAC(value);
-    if (counter == 2 * SAMP_FREQ) counter = 0;
+    writeDAC(value & 0xfff);
+//    if (counter == 2 * SAMP_FREQ) counter = 0;
     
     mPORTAToggleBits(BIT_0);
     mT2ClearIntFlag();
@@ -179,22 +201,12 @@ static PT_THREAD (protothread_frequency(struct pt *pt))
     tft_writeString("Frequency\n");
     while(1) {
         
-        
-//        if (state) incr = INCR_CONST * 350; // 350 Hz
-//        else incr = INCR_CONST * 400; // 400 Hz
-//        counter = 0;
-//        state = 1 - state;        
-        
-//        freq = (SYS_FREQ/TIMER_PR);
-//        freq = (freq * incr);
-//        freq = freq / pow(2, 32);
 
-        // draw sys_time
         tft_fillRoundRect(0,60, 100, 14, 1, ILI9340_BLACK);// x,y,w,h,radius,color
         tft_setCursor(0, 60);
         tft_setTextColor(ILI9340_YELLOW); tft_setTextSize(2);
 //        sprintf(buffer,"%.2f", freq);
-        tft_writeString(buffer);
+//        tft_writeString(buffer);
         PT_YIELD_TIME_msec(5000);
         // NEVER exit while
     } // END WHILE(1)
