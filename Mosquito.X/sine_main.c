@@ -46,7 +46,9 @@ unsigned short sineTable[TABLE_SIZE];
 volatile unsigned int phase[HARMONICS], incr[HARMONICS];
 static unsigned int amplitude[HARMONICS];
 volatile unsigned int value = 0, counter = 0;
-volatile unsigned char filterAmp = 64;
+volatile fix16 filterAmp = 0;
+const fix16 alpha = float2fix16(0.01);
+
 
 // == TFT Stuff ==========================================================
 // string buffer
@@ -144,14 +146,10 @@ void __ISR(_TIMER_2_VECTOR, ipl2) T2Int(void){
         phase[i] = phase[i] + incr[i];
         value = value + ((amplitude[i] * sineTable[phase[i] >> 24])/10000);
     }
-    // rand low pass filter
-    // FILT <-- FILT + FF(NEW - FILT)
-    filterAmp = filterAmp + ((rand() & 0x3F - filterAmp) >> 3);
-//    filterAmp = rand() & 0xfff;
-    //filterAmp = filterAmp / 0x1FFFE;
+    
     value = value - 2047;
-    value = filterAmp * value;
-    value = value / 0x7F;
+    value = fix2int16(multfix16(int2fix16(value), filterAmp >> 9));
+    value = value;
     value = value + 2047;
     
     writeDAC(value & 0xfff);
@@ -191,8 +189,6 @@ static PT_THREAD (protothread_timer(struct pt *pt))
 } // timer thread
 
 // === Frequency Thread =============================
-static double freq = 0;
-static unsigned char state = 0;
 static PT_THREAD (protothread_frequency(struct pt *pt))
 {
     PT_BEGIN(pt);
@@ -201,13 +197,16 @@ static PT_THREAD (protothread_frequency(struct pt *pt))
     tft_writeString("Frequency\n");
     while(1) {
         
-
+        filterAmp =  multfix16(alpha, abs(int2fix16((rand() )+
+                                                (rand() )+
+                                                (rand() )))) + 
+                     multfix16((1-alpha), filterAmp);
         tft_fillRoundRect(0,60, 100, 14, 1, ILI9340_BLACK);// x,y,w,h,radius,color
         tft_setCursor(0, 60);
         tft_setTextColor(ILI9340_YELLOW); tft_setTextSize(2);
-//        sprintf(buffer,"%.2f", freq);
-//        tft_writeString(buffer);
-        PT_YIELD_TIME_msec(5000);
+        sprintf(buffer,"%06.02f", fix2float16(filterAmp));
+        tft_writeString(buffer);
+        PT_YIELD_TIME_msec(50);
         // NEVER exit while
     } // END WHILE(1)
     PT_END(pt);
