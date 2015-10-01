@@ -40,14 +40,18 @@ volatile SpiChannel spiChn = SPI_CHANNEL2 ;	// the SPI channel to use
 volatile int spiClkDiv = 2 ; // 20 MHz max speed for this DAC
 // A-channel, 1x, active
 #define DAC_config_chan_A 0b0011000000000000
-#define TABLE_SIZE 256
-#define HARMONICS 4
+#define TABLE_BIT_SIZE                    8
+#define TABLE_SIZE     (1 << TABLE_BIT_SIZE)
+#define SHIFT_AMT      (32 - TABLE_BIT_SIZE)
+#define HARMONICS                         4
+//#define MOD_FREQ                        0.75 //Hz
+
 unsigned short sineTable[TABLE_SIZE];
 volatile unsigned int phase[HARMONICS], incr[HARMONICS];
+volatile unsigned int modPhase = 0, modIncr = 0;
 static unsigned int amplitude[HARMONICS];
-volatile unsigned int value = 0, counter = 0;
-volatile fix16 filterAmp = 0;
-const fix16 alpha = float2fix16(0.01);
+volatile unsigned long value = 0, modValue = 0;
+volatile float modFreq = 0.1;
 
 
 // == TFT Stuff ==========================================================
@@ -118,42 +122,28 @@ void initTimers(void){
 // from Tahmid's blog
 void __ISR(_TIMER_2_VECTOR, ipl2) T2Int(void){
     unsigned int i = 0;
-    // generate  ramp
-    //DAC_data = (DAC_data + 1) & 0xfff ; // for testing
-    // use top 5 bits
-    //writeDAC(DAC_config_chan_A | sineTable[phase >> 24]);
-//    phase = phase + incr;
-//    counter++;
-//    value = sineTable[phase >> 24];
-//    if (counter < (50 * ISR_1_MS) ){
-//        value = value - 2047;
-//        value = (value*counter);
-//        value = value / (50 * ISR_1_MS);
-//        value = value + 2047;
-//    }
-//    else if (counter > (950 * ISR_1_MS) && counter < (1000 * ISR_1_MS)){
-//        value = value - 2047;
-//        value = (value * ((1000 * ISR_1_MS) - counter));
-//        value = value / (50 * ISR_1_MS);
-//        value = value + 2047; 
-//    }
-//    else if (counter >= (1000 * ISR_1_MS)){
-//        value = 2047;
-//    }
     value = 0;
-//    counter++;
+    
+    // generate combination of wing tones
     for(i=0; i < HARMONICS; i++){
         phase[i] = phase[i] + incr[i];
-        value = value + ((amplitude[i] * sineTable[phase[i] >> 24])/10000);
+        value = value + ((amplitude[i] * sineTable[phase[i] >> SHIFT_AMT])/10000);
     }
     
+    // generate modulation frequency
+    modPhase = modPhase + modIncr;
+    modValue = sineTable[modPhase >> SHIFT_AMT];
+    
+    // remove dc offset
     value = value - 2047;
-    value = fix2int16(multfix16(int2fix16(value), filterAmp >> 9));
-    value = value;
+    
+    // AM Modulation
+    
+    value = (modValue * value) >> 12;
+    
     value = value + 2047;
     
     writeDAC(value & 0xfff);
-//    if (counter == 2 * SAMP_FREQ) counter = 0;
     
     mPORTAToggleBits(BIT_0);
     mT2ClearIntFlag();
@@ -170,7 +160,7 @@ static PT_THREAD (protothread_timer(struct pt *pt))
     PT_BEGIN(pt);
     tft_setCursor(0, 0);
     tft_setTextColor(ILI9340_WHITE);  tft_setTextSize(1);
-    tft_writeString("Time in seconds since boot\n");
+    tft_writeString("Mosquito Project: Systime:\n");
      while(1) {
        // yield time 1 second
        
@@ -193,20 +183,27 @@ static PT_THREAD (protothread_frequency(struct pt *pt))
 {
     PT_BEGIN(pt);
     tft_setCursor(0, 50);
-    tft_setTextColor(ILI9340_WHITE);  tft_setTextSize(1);
-    tft_writeString("Frequency\n");
+    tft_setTextColor(ILI9340_WHITE);  tft_setTextSize(2);
+    tft_writeString("Modulation Frequency\n");
     while(1) {
         
-        filterAmp =  multfix16(alpha, abs(int2fix16((rand() )+
-                                                (rand() )+
-                                                (rand() )))) + 
-                     multfix16((1-alpha), filterAmp);
-        tft_fillRoundRect(0,60, 100, 14, 1, ILI9340_BLACK);// x,y,w,h,radius,color
-        tft_setCursor(0, 60);
+        modIncr = (int) (INCR_CONST * modFreq);
+        
+        //random walk the modulation freq
+        modFreq *= fix2float16(rand() & 0x1ffff);
+        if (modFreq > 3){
+            modFreq /= 3;
+        } else if (modFreq < 0.00001){
+            modFreq += .5;
+        }
+        //modFreq = fix2float16(abs(float2fix16(modFreq)));
+        
+        tft_fillRoundRect(0,80, 100, 14, 1, ILI9340_BLACK);// x,y,w,h,radius,color
+        tft_setCursor(0, 80);
         tft_setTextColor(ILI9340_YELLOW); tft_setTextSize(2);
-        sprintf(buffer,"%06.02f", fix2float16(filterAmp));
+        sprintf(buffer,"%.03f Hz", modFreq);
         tft_writeString(buffer);
-        PT_YIELD_TIME_msec(50);
+        PT_YIELD_TIME_msec(200);
         // NEVER exit while
     } // END WHILE(1)
     PT_END(pt);
