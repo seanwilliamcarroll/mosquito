@@ -193,7 +193,7 @@ static PT_THREAD (protothread_frequency(struct pt *pt))
         modFreq *= fix2float16(rand() & 0x1ffff);
         if (modFreq > 3){
             modFreq /= 3;
-        } else if (modFreq < 0.00001){
+        } else if (modFreq < 0.00  1){
             modFreq += .5;
         }
         //modFreq = fix2float16(abs(float2fix16(modFreq)));
