@@ -42,14 +42,24 @@ volatile SpiChannel spiChn = SPI_CHANNEL2 ;	// the SPI channel to use
 volatile int spiClkDiv = 2 ; // 20 MHz max speed for this DAC
 
 // A-channel, 1x, active
-#define DAC_config_chan_A 0b0011000000000000
-#define TABLE_BIT_SIZE                     8 
-#define TABLE_SIZE     (1 << TABLE_BIT_SIZE)
-#define SHIFT_AMT      (32 - TABLE_BIT_SIZE)
-#define HARMONICS                          4
+#define DAC_config_chan_A  0b0011000000000000
+// Sine Table Size
+#define TABLE_BIT_SIZE                      8 
+#define TABLE_SIZE      (1 << TABLE_BIT_SIZE)
+#define SHIFT_AMT       (32 - TABLE_BIT_SIZE)
+// Number of harmonics to use
+#define HARMONICS                           4
 // Random walk frequency bounds
-#define UPPER_BOUND                        3
-#define LOWER_BOUND                    0.001
+#define UPPER_BOUND                     0.800
+#define LOWER_BOUND                     0.000
+#define WALK_INCR                       0.050
+#define MID_BOUND (UPPER_BOUND-LOWER_BOUND)/2
+
+// Max function
+#define max(a,b) \
+   ({ __typeof__ (a) _a = (a); \
+       __typeof__ (b) _b = (b); \
+     _a > _b ? _a : _b; })
 
 // 16 bit unsigned (need 12 bits for DAC)
 unsigned short sineTable[TABLE_SIZE];
@@ -64,7 +74,7 @@ volatile unsigned int value    = 0,\
                       modValue = 0;
 
 // float (Never used in ISR)
-volatile float modFreq = 0.1; //Hz
+volatile float modFreq = MID_BOUND; //Hz
 
 // == TFT Stuff ==========================================================
 // string buffer
@@ -203,18 +213,24 @@ static PT_THREAD (protothread_frequency(struct pt *pt))
     tft_writeString("Modulation Frequency\n");
     while(1) {
         
-        modIncr = (int) (INCR_CONST * modFreq);
+        // limit the lower quarter of random walk space to 0
+        modIncr = (int) (INCR_CONST * max(modFreq-MID_BOUND/2, 0));
         
         //random walk the modulation freq
         
-        //multiply by range of [0..1.99]
-        modFreq *= fix2float16(rand() & 0x1ffff);
+        //Random walk
+        if (rand() > (RAND_MAX / 2)){
+            modFreq += WALK_INCR;
+        }
+        else{
+            modFreq -= WALK_INCR;
+        }
         
         //bound the walk by lower and upper frequency bounds
         if (modFreq > UPPER_BOUND){
-            modFreq /= UPPER_BOUND;
+            modFreq = UPPER_BOUND;
         } else if (modFreq < LOWER_BOUND){
-            modFreq += .5;
+            modFreq = LOWER_BOUND;
         }
         
         // display the current AM frequency
@@ -223,7 +239,7 @@ static PT_THREAD (protothread_frequency(struct pt *pt))
         tft_setTextColor(ILI9340_YELLOW); tft_setTextSize(2);
         sprintf(buffer,"%.03f Hz", modFreq);
         tft_writeString(buffer);
-        PT_YIELD_TIME_msec(200);
+        PT_YIELD_TIME_msec(150);
         // NEVER exit while
     } // END WHILE(1)
     PT_END(pt);
