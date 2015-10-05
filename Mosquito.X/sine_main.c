@@ -17,42 +17,54 @@
 // threading library
 // config.h sets 40 MHz
 #define	SYS_FREQ 40000000
-#include "pt_cornell_TFT.h"
+#include "pt_cornell_1_2.h"
 #define SAMP_FREQ 20000
 #define TIMER_PR (SYS_FREQ/SAMP_FREQ) // SAMP_FREQ = SYS_FREQ/TIMER_PR
-#define INCR_CONST 214748.365 // INCR = F_OUT * INCR_CONST
+#define INCR_CONST ((float)pow(2, 32)/SAMP_FREQ) // INCR = F_OUT * INCR_CONST
 #define ISR_1_MS (SAMP_FREQ/1000) // 1 ms in ISR Ticks
 
 // === the fixed point macros ========================================
 typedef signed int fix16 ;
-#define multfix16(a,b) ((fix16)(((( signed long long)(a))*(( signed long long)(b)))>>16)) //multiply two fixed 16:16
+//multiply two fixed 16:16
+#define multfix16(a,b) ((fix16)(((( signed long long)(a))*\
+                                 (( signed long long)(b)))>>16)) 
 #define float2fix16(a) ((fix16)((a)*65536.0)) // 2^16
 #define fix2float16(a) ((float)(a)/65536.0)
 #define fix2int16(a)   ((int)((a)>>16))
 #define int2fix16(a)   ((fix16)((a)<<16))
 #define divfix16(a,b)  ((fix16)((((signed long long)(a)<<16)/(b)))) 
-#define sqrtfix16(a)    (float2fix16(sqrt(fix2float16(a)))) 
-#define absfix16(a)      abs(a)
+#define sqrtfix16(a)   (float2fix16(sqrt(fix2float16(a)))) 
+#define absfix16(a)    abs(a)
 
 // == SPI Stuff ==========================================================
 volatile unsigned int DAC_data ;// output value
 volatile SpiChannel spiChn = SPI_CHANNEL2 ;	// the SPI channel to use
 volatile int spiClkDiv = 2 ; // 20 MHz max speed for this DAC
+
 // A-channel, 1x, active
 #define DAC_config_chan_A 0b0011000000000000
-#define TABLE_BIT_SIZE                    8
+#define TABLE_BIT_SIZE                     8 
 #define TABLE_SIZE     (1 << TABLE_BIT_SIZE)
 #define SHIFT_AMT      (32 - TABLE_BIT_SIZE)
-#define HARMONICS                         4
-//#define MOD_FREQ                        0.75 //Hz
+#define HARMONICS                          4
+// Random walk frequency bounds
+#define UPPER_BOUND                        3
+#define LOWER_BOUND                    0.001
 
+// 16 bit unsigned (need 12 bits for DAC)
 unsigned short sineTable[TABLE_SIZE];
-volatile unsigned int phase[HARMONICS], incr[HARMONICS];
-volatile unsigned int modPhase = 0, modIncr = 0;
-static unsigned int amplitude[HARMONICS];
-volatile unsigned long value = 0, modValue = 0;
-volatile float modFreq = 0.1;
 
+// 32 bit unsigned
+volatile unsigned int phase[HARMONICS], 
+                       incr[HARMONICS];
+volatile unsigned int modPhase = 0,\
+                      modIncr  = 0;
+static   unsigned int amplitude[HARMONICS];
+volatile unsigned int value    = 0,\
+                      modValue = 0;
+
+// float (Never used in ISR)
+volatile float modFreq = 0.1; //Hz
 
 // == TFT Stuff ==========================================================
 // string buffer
@@ -127,7 +139,9 @@ void __ISR(_TIMER_2_VECTOR, ipl2) T2Int(void){
     // generate combination of wing tones
     for(i=0; i < HARMONICS; i++){
         phase[i] = phase[i] + incr[i];
-        value = value + ((amplitude[i] * sineTable[phase[i] >> SHIFT_AMT])/10000);
+        // add each successive amplitude multiplied by its weighting
+        value = value + \
+                ((amplitude[i] * sineTable[phase[i] >> SHIFT_AMT])/10000);
     }
     
     // generate modulation frequency
@@ -138,11 +152,12 @@ void __ISR(_TIMER_2_VECTOR, ipl2) T2Int(void){
     value = value - 2047;
     
     // AM Modulation
-    
     value = (modValue * value) >> 12;
     
+    // add dc offset back in
     value = value + 2047;
     
+    // output to DAC
     writeDAC(value & 0xfff);
     
     mPORTAToggleBits(BIT_0);
@@ -190,14 +205,18 @@ static PT_THREAD (protothread_frequency(struct pt *pt))
         modIncr = (int) (INCR_CONST * modFreq);
         
         //random walk the modulation freq
+        
+        //multiply by range of [0..1.99]
         modFreq *= fix2float16(rand() & 0x1ffff);
-        if (modFreq > 3){
-            modFreq /= 3;
-        } else if (modFreq < 0.00  1){
+        
+        //bound the walk by lower and upper frequency bounds
+        if (modFreq > UPPER_BOUND){
+            modFreq /= UPPER_BOUND;
+        } else if (modFreq < LOWER_BOUND){
             modFreq += .5;
         }
-        //modFreq = fix2float16(abs(float2fix16(modFreq)));
         
+        // display the current AM frequency
         tft_fillRoundRect(0,80, 100, 14, 1, ILI9340_BLACK);// x,y,w,h,radius,color
         tft_setCursor(0, 80);
         tft_setTextColor(ILI9340_YELLOW); tft_setTextSize(2);
@@ -222,11 +241,8 @@ void main(void) {
     generateTables();
     
     initDAC();
-    // Fout = incr*Fs/(2^32)
-    // Or incr = Fout*(2^32)/Fs
-    // With Fs = 1e5 (100kHz)
-    // incr = Fout * 42949.67
-    // want 400Hz
+    
+    // initialize phases and frequency increments for wing tones
     phase[0] = 0x00000000; // phase of  0
     phase[1] = 0x80000000; // phase of pi
     phase[2] = 0x80000000; // phase of pi
@@ -243,23 +259,25 @@ void main(void) {
     amplitude[2] = 1325;
     amplitude[3] =  246;
     
-    // if want 350 Hz
-    // incr = 15032384;
-
+    // setup the interrupt timer
     initTimers();
+    
+    // enable interrupts
     INTEnableSystemMultiVectoredInt();
+    
     // init the threads
     PT_INIT(&pt_timer);
     PT_INIT(&pt_frequency);
     
-
     // init the display
     tft_init_hw();
     tft_begin();
     tft_fillScreen(ILI9340_BLACK);
+    
     //240x320 vertical display
     tft_setRotation(0); // Use tft_setRotation(1) for 320x240
     
+    // schedule both threads in round robin
     while (1){
         PT_SCHEDULE(protothread_timer(&pt_timer));
         PT_SCHEDULE(protothread_frequency(&pt_frequency));

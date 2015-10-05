@@ -1,8 +1,8 @@
 /* 
- * File:   pt_cornell.h
+ * File:   pt_cornell_1_1.h
  * Author: brl4
  *
- * Created on November 18, 2014, 9:12 AM
+ * Created on Sept 22, 2015
  */
 
 /*
@@ -39,7 +39,7 @@
  *
  * $Id: pt.h,v 1.7 2006/10/02 07:52:56 adam Exp $
  */
-
+#include <plib.h>
 /**
  * \addtogroup pt
  * @{
@@ -56,8 +56,150 @@
 #ifndef __PT_H__
 #define __PT_H__
 
-#include "lc.h"
+////////////////////////
+//#include "lc.h"
+////////////////////////
+/**
+ * \file lc.h
+ * Local continuations
+ * \author
+ * Adam Dunkels <adam@sics.se>
+ *
+ */
 
+#ifdef DOXYGEN
+/**
+ * Initialize a local continuation.
+ *
+ * This operation initializes the local continuation, thereby
+ * unsetting any previously set continuation state.
+ *
+ * \hideinitializer
+ */
+#define LC_INIT(lc)
+
+/**
+ * Set a local continuation.
+ *
+ * The set operation saves the state of the function at the point
+ * where the operation is executed. As far as the set operation is
+ * concerned, the state of the function does <b>not</b> include the
+ * call-stack or local (automatic) variables, but only the program
+ * counter and such CPU registers that needs to be saved.
+ *
+ * \hideinitializer
+ */
+#define LC_SET(lc)
+
+/**
+ * Resume a local continuation.
+ *
+ * The resume operation resumes a previously set local continuation, thus
+ * restoring the state in which the function was when the local
+ * continuation was set. If the local continuation has not been
+ * previously set, the resume operation does nothing.
+ *
+ * \hideinitializer
+ */
+#define LC_RESUME(lc)
+
+/**
+ * Mark the end of local continuation usage.
+ *
+ * The end operation signifies that local continuations should not be
+ * used any more in the function. This operation is not needed for
+ * most implementations of local continuation, but is required by a
+ * few implementations.
+ *
+ * \hideinitializer 
+ */
+#define LC_END(lc)
+
+/**
+ * \var typedef lc_t;
+ *
+ * The local continuation type.
+ *
+ * \hideinitializer
+ */
+#endif /* DOXYGEN */
+
+//#ifndef __LC_H__
+//#define __LC_H__
+
+
+//#ifdef LC_INCLUDE
+//#include LC_INCLUDE
+//#else
+
+/////////////////////////////
+//#include "lc-switch.h"
+/////////////////////////////
+
+//#ifndef __LC_SWITCH_H__
+//#define __LC_SWITCH_H__
+
+/* WARNING! lc implementation using switch() does not work if an
+   LC_SET() is done within another switch() statement! */
+
+/** \hideinitializer */
+/*
+typedef unsigned short lc_t;
+
+#define LC_INIT(s) s = 0;
+
+#define LC_RESUME(s) switch(s) { case 0:
+
+#define LC_SET(s) s = __LINE__; case __LINE__:
+
+#define LC_END(s) }
+
+#endif /* __LC_SWITCH_H__ */
+
+/** @} */
+
+//#endif /* LC_INCLUDE */
+
+//#endif /* __LC_H__ */
+
+/** @} */
+/** @} */
+
+/////////////////////////////
+//#include "lc-addrlabels.h"
+/////////////////////////////
+
+#ifndef __LC_ADDRLABELS_H__
+#define __LC_ADDRLABELS_H__
+
+/** \hideinitializer */
+typedef void * lc_t;
+
+#define LC_INIT(s) s = NULL
+
+#define LC_RESUME(s)				\
+  do {						\
+    if(s != NULL) {				\
+      goto *s;					\
+    }						\
+  } while(0)
+
+#define LC_CONCAT2(s1, s2) s1##s2
+#define LC_CONCAT(s1, s2) LC_CONCAT2(s1, s2)
+
+#define LC_SET(s)				\
+  do {						\
+    LC_CONCAT(LC_LABEL, __LINE__):   	        \
+    (s) = &&LC_CONCAT(LC_LABEL, __LINE__);	\
+  } while(0)
+
+#define LC_END(s)
+
+#endif /* __LC_ADDRLABELS_H__ */
+
+
+
+//////////////////////////////////////////
 struct pt {
   lc_t lc;
   int pri;
@@ -332,7 +474,7 @@ struct pt {
 #ifndef __PT_SEM_H__
 #define __PT_SEM_H__
 
-#include "pt.h"
+//#include "pt.h"
 
 struct pt_sem {
   unsigned int count;
@@ -350,7 +492,7 @@ struct pt_sem {
  * representing the semaphore
  *
  * \param c (unsigned int) The initial count of the semaphore.
- * \hideinitializer
+ * \hide initializer
  */
 #define PT_SEM_INIT(s, c) (s)->count = c
 
@@ -401,29 +543,15 @@ struct pt_sem {
 
 // macro to time a thread execution interveal in millisec
 // max time 4000 sec
-#include <limits.h>
+//#include <plib.h>
+//#include <limits.h>
+//#include "config.h"
+
 #define PT_YIELD_TIME_msec(delay_time)  \
     do { static unsigned int time_thread ;\
     time_thread = time_tick_millsec + (unsigned int)delay_time ; \
     PT_YIELD_UNTIL(pt, (time_tick_millsec >= time_thread)); \
     } while(0);
-
-// macro to time a thread execution interveal
-// parameter is in MICROSEC
-// Max time is 4000 sec
-//#define PT_YIELD_TIME_usec(delay_time)  \
- //   do { static unsigned int time_thread, delta=0, time45; time45=ReadTimer45();\
- ///   time_thread = time45 + (unsigned int)delay_time ; \
- //   if (time_thread < time45) {delta = UINT_MAX - time45; } \
- //    PT_YIELD_UNTIL(pt, (delta==0 && ReadTimer45()<time45) || (ReadTimer45()+delta >= time_thread+delta)); \
- //   } while(0);
-// PT_YIELD_UNTIL(pt, ReadTimer45()+delta >= time_thread+delta);
-
-//#define PT_YIELD_TIME_usec(delay_time) \
-//    do { static signed int time_thread ; \
-//      time_thread = (signed int)delay_time + (signed int)ReadTimer45() ; \
- //     PT_YIELD_UNTIL(pt, (signed int)ReadTimer45() >= time_thread); \
- //   } while(0);
 
 // macro to return system time
 #define PT_GET_TIME() (time_tick_millsec)
@@ -474,10 +602,12 @@ do { static int i ; \
 
 //====================================================================
 //=== serial setup ===================================================
+//#ifdef use_uart_serial
+///////////////////////////
 // UART parameters
-#define BAUDRATE 9600 // must match PC end
+
 #define PB_DIVISOR (1 << OSCCONbits.PBDIV) // read the peripheral bus divider, FPBDIV
-#define PB_FREQ SYS_FREQ/PB_DIVISOR // periperhal bus frequency
+#define PB_FREQ sys_clock/PB_DIVISOR // periperhal bus frequency
 #define clrscr() printf( "\x1b[2J")
 #define home()   printf( "\x1b[H")
 #define pcr()    printf( '\r')
@@ -583,20 +713,22 @@ int PT_DMA_PutSerialBuffer(struct pt *pt)
     // and indicate the end of the thread
     PT_END(pt);
 }
+//#endif //#ifdef use_uart_serial
 
 //======================================================================
-// === setup uart and DMA and timer and vREF
-// debugging putput global
+// vref confing (if used)
 int CVRCON_setup ;
-unsigned int time_tick_millsec ;
 
-// Timer 2 interrupt handler ///////
+// system time
+volatile unsigned int time_tick_millsec ;
+
+// Timer 5 interrupt handler ///////
 // ipl2 means "interrupt priority level 2"
-void __ISR(_TIMER_5_VECTOR, ipl2) Timer2Handler(void)
+void __ISR(_TIMER_5_VECTOR, IPL2AUTO) Timer5Handler(void) //_TIMER_5_VECTOR
 {
     // clear the interrupt flag
     mT5ClearIntFlag();
-    //count millseconds
+    //count milliseconds
     time_tick_millsec++ ;
 }
 
@@ -606,18 +738,18 @@ void PT_setup (void)
     // Given the options, this function will change the flash wait states, RAM
     // wait state and enable prefetch cache but will not change the PBDIV.
     // The PBDIV value is already set via the pragma FPBDIV option above..
-    SYSTEMConfig(SYS_FREQ, SYS_CFG_WAIT_STATES | SYS_CFG_PCACHE);
+    SYSTEMConfig(sys_clock, SYS_CFG_WAIT_STATES | SYS_CFG_PCACHE);
 
-  // === init the USART i/o pins =========
- // PPSInput (2, U2RX, RPB11); //Assign U2RX to pin RPB11 -- Physical pin 22 on 28 PDIP
- // PPSOutput(4, RPB10, U2TX); //Assign U2TX to pin RPB10 -- Physical pin 21 on 28 PDIP
   ANSELA =0; //make sure analog is cleared
   ANSELB =0;
+  
+#ifdef use_uart_serial
   // === init the uart2 ===================
-  /*
+ PPSInput (2, U2RX, RPB11); //Assign U2RX to pin RPB11 -- Physical pin 22 on 28 PDIP
+ PPSOutput(4, RPB10, U2TX); //Assign U2TX to pin RPB10 -- Physical pin 21 on 28 PDIP
   UARTConfigure(UART2, UART_ENABLE_PINS_TX_RX_ONLY);
   UARTSetLineControl(UART2, UART_DATA_SIZE_8_BITS | UART_PARITY_NONE | UART_STOP_BITS_1);
-  UARTSetDataRate(UART2, PB_FREQ, BAUDRATE);
+  UARTSetDataRate(UART2, pb_clock, BAUDRATE);
   UARTEnable(UART2, UART_ENABLE_FLAGS(UART_PERIPHERAL | UART_RX | UART_TX));
   printf("\n\r..protothreads start..\n\r");
   // === set up DMA for UART output =========
@@ -631,13 +763,12 @@ void PT_setup (void)
   DmaChnSetEvEnableFlags(DMA_CHANNEL1, DMA_EV_BLOCK_DONE);
   // set null as ending character (of a string)
   DmaChnSetMatchPattern(DMA_CHANNEL1, 0x00);
-*/
+#endif //#ifdef use_uart_serial
+  
   // ===Set up timer5 ======================
-  // timer 5: on,  interrupts, internal clock, prescalar 32,
-  // ticks once/microsec!
-  // set up to count millsec 40 MHz/32 = 1.25 MHz or 0.8 microsec per tick so
-  // 1250 x 0.8 = 1 mSec
-  OpenTimer5(T5_ON  | T5_SOURCE_INT | T5_PS_1_32 , 1250);
+  // timer 5: on,  interrupts, internal clock, 
+  // set up to count millsec
+  OpenTimer5(T5_ON  | T5_SOURCE_INT | T5_PS_1_1 , pb_clock/1000);
   // set up the timer interrupt with a priority of 2
   ConfigIntTimer5(T5_INT_ON | T5_INT_PRIOR_2);
   mT5ClearIntFlag(); // and clear the interrupt flag
@@ -645,15 +776,14 @@ void PT_setup (void)
   time_tick_millsec = 0;
 
   //=== Set up VREF as a debugger output =======
+  #ifdef use_vref_debug
   // set up the Vref pin and use as a DAC
   // enable module| eanble output | use low range output | use internal reference | desired step
-  //CVREFOpen( CVREF_ENABLE | CVREF_OUTPUT_ENABLE | CVREF_RANGE_LOW | CVREF_SOURCE_AVDD | CVREF_STEP_0 );
+  CVREFOpen( CVREF_ENABLE | CVREF_OUTPUT_ENABLE | CVREF_RANGE_LOW | CVREF_SOURCE_AVDD | CVREF_STEP_0 );
   // And read back setup from CVRCON for speed later
   // 0x8060 is enabled with output enabled, Vdd ref, and 0-0.6(Vdd) range
-  //CVRCON_setup = CVRCON; //CVRCON = 0x8060 from Tahmid http://tahmidmc.blogspot.com/
+  CVRCON_setup = CVRCON; //CVRCON = 0x8060 from Tahmid http://tahmidmc.blogspot.com/
 
-  // setup system wide interrupts
-  // IF you need them for some other service besides ProtoThreads
-  //INTEnableSystemMultiVectoredInt();
+#endif //#ifdef use_vref_debug
 
 }
