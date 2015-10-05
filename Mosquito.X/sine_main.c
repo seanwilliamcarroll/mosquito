@@ -73,7 +73,8 @@ char buffer[60];
 // --- thread structures -------------------------------------------------
 // thread control structs
 // note that UART input and output are threads
-static struct pt pt_timer, pt_frequency ;
+static struct pt pt_timer,\
+              pt_frequency ;
 
 // system 1 second interval tick
 int sys_time_seconds ;
