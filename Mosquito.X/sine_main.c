@@ -23,6 +23,13 @@
 #define INCR_CONST ((float)pow(2, 32)/SAMP_FREQ) // INCR = F_OUT * INCR_CONST
 #define ISR_1_MS (SAMP_FREQ/1000) // 1 ms in ISR Ticks
 
+// == MODE ===========================================================
+// 0 for Text Mode
+// 1 for Graphics Mode
+
+#define MODE 1
+
+
 // === the fixed point macros ========================================
 typedef signed int fix16 ;
 //multiply two fixed 16:16
@@ -184,46 +191,67 @@ void __ISR(_TIMER_2_VECTOR, ipl2) T2Int(void){
 static PT_THREAD (protothread_timer(struct pt *pt))
 {
     PT_BEGIN(pt);
-    tft_setCursor(0, 0);
-    tft_setTextColor(ILI9340_WHITE);  tft_setTextSize(1);
-    tft_writeString("Mosquito Project: Systime:\n");
-     while(1) {
+    if (!MODE){
+        tft_setCursor(0, 0);
+        tft_setTextColor(ILI9340_WHITE);
+        tft_setTextSize(1);
+        tft_writeString("Mosquito Project: Systime:\n");
+    }
+    while(1) {
        // yield time 1 second
        
        sys_time_seconds++ ;
 
        // draw sys_time
-       tft_fillRoundRect(0,10, 100, 14, 1, ILI9340_BLACK);// x,y,w,h,radius,color
-       tft_setCursor(0, 10);
-       tft_setTextColor(ILI9340_YELLOW); tft_setTextSize(2);
-       sprintf(buffer,"%d", sys_time_seconds);
-       tft_writeString(buffer);
+        if (!MODE){
+            tft_fillRoundRect(0, 10, 100, 14, 1, ILI9340_BLACK); // x,y,w,h,radius,color
+            tft_setCursor(0, 10);
+            tft_setTextColor(ILI9340_YELLOW);
+            tft_setTextSize(2);
+            sprintf(buffer, "%d", sys_time_seconds);
+            tft_writeString(buffer);
+        }
        PT_YIELD_TIME_msec(1000) ;
        // NEVER exit while
      } // END WHILE(1)
   PT_END(pt);
 } // timer thread
 
+#define BOX_WIDTH  10
+#define BOX_HEIGHT  5
+
 // === Frequency Thread =============================
 static PT_THREAD (protothread_frequency(struct pt *pt))
 {
     PT_BEGIN(pt);
-    tft_setCursor(0, 50);
-    tft_setTextColor(ILI9340_WHITE);  tft_setTextSize(2);
-    tft_writeString("Modulation Frequency\n");
+    static unsigned int y_pos = 0;
+    if (!MODE){
+        tft_setCursor(0, 50);
+        tft_setTextColor(ILI9340_WHITE);  tft_setTextSize(2);
+        tft_writeString("Modulation Frequency\n");
+    }
     while(1) {
-        
+        if (MODE){
+            tft_fillRect(0, y_pos, 240, BOX_HEIGHT, ILI9340_BLACK);
+        }
         // limit the lower quarter of random walk space to 0
         modIncr = (int) (INCR_CONST * max(modFreq-MID_BOUND/2, 0));
         
         //random walk the modulation freq
         
         //Random walk
-        if (rand() > (RAND_MAX / 2)){
+        int r = rand();
+        if (r < ( 7*(RAND_MAX / 20))){
             modFreq += WALK_INCR;
         }
-        else{
+        else if (r < 14*(RAND_MAX / 20)){
             modFreq -= WALK_INCR;
+        }
+        else if (r < 17 *(RAND_MAX / 20)){
+            modFreq += 3 * WALK_INCR;
+        }
+        else {
+            modFreq -= 3 * WALK_INCR;
         }
         
         //bound the walk by lower and upper frequency bounds
@@ -234,12 +262,22 @@ static PT_THREAD (protothread_frequency(struct pt *pt))
         }
         
         // display the current AM frequency
-        tft_fillRoundRect(0,80, 100, 14, 1, ILI9340_BLACK);// x,y,w,h,radius,color
-        tft_setCursor(0, 80);
-        tft_setTextColor(ILI9340_YELLOW); tft_setTextSize(2);
-        sprintf(buffer,"%.03f Hz", modFreq);
-        tft_writeString(buffer);
-        PT_YIELD_TIME_msec(150);
+        if (MODE) {
+            // draw envelope on screen
+            tft_fillRect(120-(120/UPPER_BOUND)*modFreq, y_pos, BOX_WIDTH, BOX_HEIGHT, ILI9340_WHITE);
+            tft_fillRect(120+(120/UPPER_BOUND)*modFreq, y_pos, BOX_WIDTH, BOX_HEIGHT, ILI9340_WHITE);
+            y_pos += BOX_HEIGHT;
+            if (y_pos >= 320) y_pos = 0;
+            tft_fillRect(0, y_pos, 240, BOX_HEIGHT, ILI9340_RED);
+        } 
+        else{
+            tft_fillRoundRect(0,80, 100, 14, 1, ILI9340_BLACK);// x,y,w,h,radius,color
+            tft_setCursor(0, 80);
+            tft_setTextColor(ILI9340_YELLOW); tft_setTextSize(2);
+            sprintf(buffer,"%.03f Hz", modFreq);
+            tft_writeString(buffer);
+        }
+        PT_YIELD_TIME_msec(100);
         // NEVER exit while
     } // END WHILE(1)
     PT_END(pt);
