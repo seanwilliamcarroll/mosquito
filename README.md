@@ -4,7 +4,9 @@ Gates Foundation Project to synthesize female mosquito wing tones so as to attra
 
 
 Two Modes: Text Mode and Graphics Mode
+
 -- set MODE to 0 for Text display, shows system time and current modulation frequency
+
 -- set MODE to 1 for Graphics display, shows a graphical representation of modulation envelope in real time
 
 
