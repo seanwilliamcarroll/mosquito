@@ -38,5 +38,10 @@
 // sys_clock/FPBDIV
 #define pb_clock sys_clock // divide by one in this case
 
+// Turn on UART
+#define use_uart_serial
+
+
+
 #endif	/* CONFIG_H */
 

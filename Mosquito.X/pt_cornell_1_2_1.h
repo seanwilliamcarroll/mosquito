@@ -1,5 +1,5 @@
 /* 
- * File:   pt_cornell_1_1.h
+ * File:   pt_cornell_1_2_1.h
  * Author: brl4
  *
  * Created on Sept 22, 2015
@@ -613,7 +613,7 @@ do { static int i ; \
 #define pcr()    printf( '\r')
 #define crlf     putchar(0x0a); putchar(0x0d);
 #define backspace 0x7f // make sure your backspace matches this!
-#define max_chars 32 // for input/output buffer
+#define max_chars 64 // for input/output buffer
 //====================================================================
 // build a string from the UART2 /////////////
 //////////////////////////////////////////////
@@ -707,7 +707,9 @@ int PT_DMA_PutSerialBuffer(struct pt *pt)
     // wait for DMA done
     //mPORTBClearBits(BIT_0);
     PT_YIELD_UNTIL(pt, DmaChnGetEvFlags(DMA_CHANNEL1) & DMA_EV_BLOCK_DONE);
-
+    //wait until the transmit buffer is empty
+    PT_YIELD_UNTIL(pt, U2STA&0x100);
+    
     // kill this output thread, to allow spawning thread to execute
     PT_EXIT(pt);
     // and indicate the end of the thread

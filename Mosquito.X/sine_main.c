@@ -17,7 +17,7 @@
 // threading library
 // config.h sets 40 MHz
 #define	SYS_FREQ 40000000
-#include "pt_cornell_1_2.h"
+#include "pt_cornell_1_2_1.h"
 #define SAMP_FREQ 20000
 #define TIMER_PR (SYS_FREQ/SAMP_FREQ) // SAMP_FREQ = SYS_FREQ/TIMER_PR
 #define INCR_CONST ((float)pow(2, 32)/SAMP_FREQ) // INCR = F_OUT * INCR_CONST
@@ -43,6 +43,29 @@ typedef signed int fix16 ;
 #define sqrtfix16(a)   (float2fix16(sqrt(fix2float16(a)))) 
 #define absfix16(a)    abs(a)
 
+// == Flash Programming ==================================================
+#define FLASH_PAGE_SIZE_BYTES	(4096) // 4k bytes/page for PIC32
+#define FLASH_SIZE_BYTES (4*1024) // allocate 4k bytes of flash (one page)
+
+extern volatile UINT8 _FLASH_BASE[];
+extern void * FLASH_BASE;
+UINT8 pagebuf[4096];
+UINT8 buf[512];
+
+// Note that:
+// "bytes" needs to be a multiple of BYTE_PAGE_SIZE (and aligned that way) if you intend to erase
+// "bytes" needs to be a multiple of BYTE_ROW_SIZE (and aligned that way) if you intend to write rows
+// "bytes" needs to be a multiple of sizeof(int) if you intend to write words
+#define NVM_ALLOCATE(name, align, bytes) volatile UINT8 name[(bytes)] \
+__attribute__ ((aligned(align),section(".text,\"ax\",@progbits #"))) = \
+{ [0 ...(bytes)-1] = 0xFF } 
+
+NVM_ALLOCATE(_FLASH_BASE, FLASH_PAGE_SIZE_BYTES, FLASH_SIZE_BYTES);	// allocate NVM flash logging buffer, aligned on erasable page
+void* FLASH_BASE = &_FLASH_BASE;
+
+
+
+
 // == SPI Stuff ==========================================================
 volatile unsigned int DAC_data ;// output value
 volatile SpiChannel spiChn = SPI_CHANNEL2 ;	// the SPI channel to use
@@ -56,11 +79,39 @@ volatile int spiClkDiv = 2 ; // 20 MHz max speed for this DAC
 #define SHIFT_AMT       (32 - TABLE_BIT_SIZE)
 // Number of harmonics to use
 #define HARMONICS                           4
-// Random walk frequency bounds
-#define UPPER_BOUND                     0.800
-#define LOWER_BOUND                     0.000
-#define WALK_INCR                       0.050
-#define MID_BOUND (UPPER_BOUND-LOWER_BOUND)/2
+// Random walk frequency bounds struct
+typedef struct _FREQ_BOUNDS{
+    float UPPER_BOUND;
+    float LOWER_BOUND;
+    float WALK_INCR;
+    float MID_BOUND;
+} FREQ_BOUND;
+
+FREQ_BOUND BOUNDS;
+
+void flashInit()
+{
+    // This is the first time through and the memory has not been initialized yet, so... do it
+    
+    // now that the variables have been initialized, write them to flash
+    // First, erase the page
+    
+    BOUNDS.LOWER_BOUND = 0.000;
+    BOUNDS.UPPER_BOUND = 0.800;
+    BOUNDS.WALK_INCR   = 0.050;
+    BOUNDS.MID_BOUND   = 0.400;
+    
+
+    NVMErasePage(FLASH_BASE);
+
+    NVMProgram(FLASH_BASE,&BOUNDS,4096,pagebuf);
+};
+
+void saveParameters(){
+    NVMErasePage(FLASH_BASE);
+
+    NVMProgram(FLASH_BASE,&BOUNDS,4096,pagebuf);
+}
 
 // Max function
 #define max(a,b) \
@@ -81,7 +132,7 @@ volatile unsigned int value    = 0,\
                       modValue = 0;
 
 // float (Never used in ISR)
-volatile float modFreq = MID_BOUND; //Hz
+volatile float modFreq = 0.400; //Hz
 
 // == TFT Stuff ==========================================================
 // string buffer
@@ -90,8 +141,12 @@ char buffer[60];
 // --- thread structures -------------------------------------------------
 // thread control structs
 // note that UART input and output are threads
-static struct pt pt_timer,\
-              pt_frequency ;
+static struct pt pt_timer,
+              pt_frequency,
+              pt_cmd, 
+              pt_input, 
+              pt_DMA_output,
+              pt_output;
 
 // system 1 second interval tick
 int sys_time_seconds ;
@@ -235,37 +290,37 @@ static PT_THREAD (protothread_frequency(struct pt *pt))
             tft_fillRect(0, y_pos, 240, BOX_HEIGHT, ILI9340_BLACK);
         }
         // limit the lower quarter of random walk space to 0
-        modIncr = (int) (INCR_CONST * max(modFreq-MID_BOUND/2, 0));
+        modIncr = (int) (INCR_CONST * max(modFreq-BOUNDS.MID_BOUND/2, 0));
         
         //random walk the modulation freq
         
         //Random walk
         int r = rand();
         if (r < ( 7*(RAND_MAX / 20))){
-            modFreq += WALK_INCR;
+            modFreq += BOUNDS.WALK_INCR;
         }
         else if (r < 14*(RAND_MAX / 20)){
-            modFreq -= WALK_INCR;
+            modFreq -= BOUNDS.WALK_INCR;
         }
         else if (r < 17 *(RAND_MAX / 20)){
-            modFreq += 3 * WALK_INCR;
+            modFreq += 3 * BOUNDS.WALK_INCR;
         }
         else {
-            modFreq -= 3 * WALK_INCR;
+            modFreq -= 3 * BOUNDS.WALK_INCR;
         }
         
         //bound the walk by lower and upper frequency bounds
-        if (modFreq > UPPER_BOUND){
-            modFreq = UPPER_BOUND;
-        } else if (modFreq < LOWER_BOUND){
-            modFreq = LOWER_BOUND;
+        if (modFreq > BOUNDS.UPPER_BOUND){
+            modFreq = BOUNDS.UPPER_BOUND;
+        } else if (modFreq < BOUNDS.LOWER_BOUND){
+            modFreq = BOUNDS.LOWER_BOUND;
         }
         
         // display the current AM frequency
         if (MODE) {
             // draw envelope on screen
-            tft_fillRect(120-(120/UPPER_BOUND)*modFreq, y_pos, BOX_WIDTH, BOX_HEIGHT, ILI9340_WHITE);
-            tft_fillRect(120+(120/UPPER_BOUND)*modFreq, y_pos, BOX_WIDTH, BOX_HEIGHT, ILI9340_WHITE);
+            tft_fillRect(120-(120/BOUNDS.UPPER_BOUND)*modFreq, y_pos, BOX_WIDTH, BOX_HEIGHT, ILI9340_WHITE);
+            tft_fillRect(120+(120/BOUNDS.UPPER_BOUND)*modFreq, y_pos, BOX_WIDTH, BOX_HEIGHT, ILI9340_WHITE);
             y_pos += BOX_HEIGHT;
             if (y_pos >= 320) y_pos = 0;
             tft_fillRect(0, y_pos, 240, BOX_HEIGHT, ILI9340_RED);
@@ -283,6 +338,103 @@ static PT_THREAD (protothread_frequency(struct pt *pt))
     PT_END(pt);
 } // frequency thread
 
+// === Command Thread ======================================================
+// The serial interface
+static char cmd[16]; 
+static float cmd_value;
+
+static PT_THREAD (protothread_cmd(struct pt *pt))
+{
+    PT_BEGIN(pt);
+      while(1) {
+        // send the prompt via DMA to serial
+        sprintf(PT_send_buffer,"cmd>");
+        // by spawning a print thread
+        PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
+
+        //spawn a thread to handle terminal input
+        // the input thread waits for input
+        // -- BUT does NOT block other threads
+        // string is returned in "PT_term_buffer"
+        PT_SPAWN(pt, &pt_input, PT_GetSerialBuffer(&pt_input));
+        // returns when the thead dies
+        // in this case, when <enter> is pushed
+        // now parse the string
+        sscanf(PT_term_buffer, "%s %e", cmd, &cmd_value); 
+        // reset the send buffer
+        sprintf(PT_send_buffer,"");
+
+        // system time command
+        if (cmd[0]=='t' ) {
+            
+            sprintf(PT_send_buffer,"%d \n", sys_time_seconds);
+            // by spawning a print thread
+            PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output) );
+        }
+        
+        // help command
+        if (cmd[0] == 'h'){
+            sprintf(PT_send_buffer, "Commands:\n");
+            PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output) );
+            sprintf(PT_send_buffer, "-- t: Prints system time\n");
+            PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output) );
+            sprintf(PT_send_buffer, "-- p: Prints current parameters\n");
+            PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output) );
+            sprintf(PT_send_buffer, "-- u <input>: Sets Upper Bound on Random Walk to <input>\n");
+            PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output) );
+            sprintf(PT_send_buffer, "-- l <input>: Sets Lower Bound on Random Walk to <input>\n");
+            PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output) );
+            sprintf(PT_send_buffer, "-- w <input>: Sets Walk Increment on Random Walk to <input>\n");
+            PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output) );
+        }
+        
+        // current parameters
+        if (cmd[0] == 'p') {
+            sprintf(PT_send_buffer, "Parameters:\n");
+            PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output) );
+            sprintf(PT_send_buffer, "-- u: %f\n", BOUNDS.UPPER_BOUND);
+            PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output) );
+            sprintf(PT_send_buffer, "-- l: %f\n", BOUNDS.LOWER_BOUND);
+            PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output) );
+            sprintf(PT_send_buffer, "-- w: %f\n", BOUNDS.WALK_INCR);
+            PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output) );
+        }
+        
+        // set upper bound on random walk
+        if (cmd[0] == 'u') {
+            BOUNDS.UPPER_BOUND = cmd_value;
+            BOUNDS.MID_BOUND = (BOUNDS.UPPER_BOUND-BOUNDS.LOWER_BOUND)/2;
+        }
+        
+        // set lower bound on random walk
+        if (cmd[0] == 'l') {
+            BOUNDS.LOWER_BOUND = cmd_value;
+            BOUNDS.MID_BOUND = (BOUNDS.UPPER_BOUND-BOUNDS.LOWER_BOUND)/2;
+        }
+        
+        // set walk increment on random walk
+        if (cmd[0] == 'w') {
+            BOUNDS.WALK_INCR = cmd_value;
+        }
+        
+        // Initialize memory for Frequency Bounds on random walk if not set yet
+        if (cmd[0] == 'i') {
+            flashInit();
+            memcpy(&BOUNDS, FLASH_BASE, sizeof(BOUNDS));
+        }
+        
+        // Save current parameters on Frequency Bounds
+        if (cmd[0] == 's') {
+            saveParameters();
+        }
+        
+        //reset the command buffer
+        sprintf(cmd, "");
+        // never exit while
+      } // END WHILE(1)
+  PT_END(pt);
+} // UART Thread
+
 
 // ==== Main ========================================
 void main(void) {
@@ -296,6 +448,7 @@ void main(void) {
     generateTables();
     
     initDAC();
+    memcpy(&BOUNDS, FLASH_BASE, sizeof(BOUNDS));
     
     // initialize phases and frequency increments for wing tones
     phase[0] = 0x00000000; // phase of  0
@@ -323,6 +476,10 @@ void main(void) {
     // init the threads
     PT_INIT(&pt_timer);
     PT_INIT(&pt_frequency);
+    PT_INIT(&pt_cmd);
+    PT_INIT(&pt_input);
+    PT_INIT(&pt_DMA_output);
+    PT_INIT(&pt_output);
     
     // init the display
     tft_init_hw();
@@ -336,6 +493,7 @@ void main(void) {
     while (1){
         PT_SCHEDULE(protothread_timer(&pt_timer));
         PT_SCHEDULE(protothread_frequency(&pt_frequency));
+        PT_SCHEDULE(protothread_cmd(&pt_cmd));
     }
 } // end main
 
