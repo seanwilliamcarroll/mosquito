@@ -7,8 +7,8 @@
 
 // graphics libraries
 #include "config.h"
-#include "tft_master.h"
-#include "tft_gfx.h"
+//#include "tft_master.h"
+//#include "tft_gfx.h"
 // need for rand function
 #include <stdlib.h> 
 #include <xc.h>
@@ -81,7 +81,7 @@ typedef struct _SYS_SETTINGS {
     float LOWER_BOUND;
     float WALK_INCR;
     float MID_BOUND;
-    unsigned char MODE;
+    //unsigned char MODE;
     // 0 for Text Mode
     // 1 for Graphics Mode
 } SYS_SETTINGS;
@@ -137,7 +137,7 @@ void flashInit() {
     SETTINGS.UPPER_BOUND = 0.800;
     SETTINGS.WALK_INCR = 0.050;
     SETTINGS.MID_BOUND = 0.400;
-    SETTINGS.MODE = 1; //default to graphics mode
+    //SETTINGS.MODE = 1; //default to graphics mode
     // now that the variables have been initialized, write them to flash
     
     // First, erase the page
@@ -248,23 +248,23 @@ static PT_THREAD(protothread_timer(struct pt *pt)) {
     PT_BEGIN(pt);
     while (1) {
         // yield time 1 second
-        if (!SETTINGS.MODE) {
-            tft_setCursor(0, 0);
-            tft_setTextColor(ILI9340_WHITE);
-            tft_setTextSize(1);
-            tft_writeString("Mosquito Project: Systime:\n");
-        }
+//        if (!SETTINGS.MODE) {
+//            tft_setCursor(0, 0);
+//            tft_setTextColor(ILI9340_WHITE);
+//            tft_setTextSize(1);
+//            tft_writeString("Mosquito Project: Systime:\n");
+//        }
         sys_time_seconds++;
 
         // draw sys_time
-        if (!SETTINGS.MODE) {
-            tft_fillRoundRect(0, 10, 100, 14, 1, ILI9340_BLACK); // x,y,w,h,radius,color
-            tft_setCursor(0, 10);
-            tft_setTextColor(ILI9340_YELLOW);
-            tft_setTextSize(2);
-            sprintf(buffer, "%d", sys_time_seconds);
-            tft_writeString(buffer);
-        }
+//        if (!SETTINGS.MODE) {
+//            tft_fillRoundRect(0, 10, 100, 14, 1, ILI9340_BLACK); // x,y,w,h,radius,color
+//            tft_setCursor(0, 10);
+//            tft_setTextColor(ILI9340_YELLOW);
+//            tft_setTextSize(2);
+//            sprintf(buffer, "%d", sys_time_seconds);
+//            tft_writeString(buffer);
+//        }
         PT_YIELD_TIME_msec(1000);
         // NEVER exit while
     } // END WHILE(1)
@@ -275,15 +275,15 @@ static PT_THREAD(protothread_timer(struct pt *pt)) {
 static PT_THREAD(protothread_frequency(struct pt *pt)) {
     PT_BEGIN(pt);
     while (1) {
-        if (!SETTINGS.MODE) {
-            tft_setCursor(0, 50);
-            tft_setTextColor(ILI9340_WHITE);
-            tft_setTextSize(2);
-            tft_writeString("Modulation Frequency\n");
-        }
-        if (SETTINGS.MODE) {
-            tft_fillRect(0, y_pos, 240, BOX_HEIGHT, ILI9340_BLACK);
-        }
+//        if (!SETTINGS.MODE) {
+//            tft_setCursor(0, 50);
+//            tft_setTextColor(ILI9340_WHITE);
+//            tft_setTextSize(2);
+//            tft_writeString("Modulation Frequency\n");
+//        }
+//        if (SETTINGS.MODE) {
+//            tft_fillRect(0, y_pos, 240, BOX_HEIGHT, ILI9340_BLACK);
+//        }
         // limit the lower quarter of random walk space to 0
         modIncr = (int) (INCR_CONST * max(modFreq - SETTINGS.MID_BOUND / 2, 0));
 
@@ -309,22 +309,22 @@ static PT_THREAD(protothread_frequency(struct pt *pt)) {
         }
 
         // display the current AM frequency
-        if (SETTINGS.MODE) {
-            // draw envelope on screen
-            tft_fillRect(120 - (120 / SETTINGS.UPPER_BOUND) * modFreq, y_pos, BOX_WIDTH, BOX_HEIGHT, ILI9340_WHITE);
-            tft_fillRect(120 + (120 / SETTINGS.UPPER_BOUND) * modFreq, y_pos, BOX_WIDTH, BOX_HEIGHT, ILI9340_WHITE);
-            y_pos += BOX_HEIGHT;
-            if (y_pos >= 320) y_pos = 0;
-            tft_fillRect(0, y_pos, 240, BOX_HEIGHT, ILI9340_RED);
-        }
-        else {
-            tft_fillRoundRect(0, 80, 100, 14, 1, ILI9340_BLACK); // x,y,w,h,radius,color
-            tft_setCursor(0, 80);
-            tft_setTextColor(ILI9340_YELLOW);
-            tft_setTextSize(2);
-            sprintf(buffer, "%.03f Hz", modFreq);
-            tft_writeString(buffer);
-        }
+//        if (SETTINGS.MODE) {
+//            // draw envelope on screen
+//            tft_fillRect(120 - (120 / SETTINGS.UPPER_BOUND) * modFreq, y_pos, BOX_WIDTH, BOX_HEIGHT, ILI9340_WHITE);
+//            tft_fillRect(120 + (120 / SETTINGS.UPPER_BOUND) * modFreq, y_pos, BOX_WIDTH, BOX_HEIGHT, ILI9340_WHITE);
+//            y_pos += BOX_HEIGHT;
+//            if (y_pos >= 320) y_pos = 0;
+//            tft_fillRect(0, y_pos, 240, BOX_HEIGHT, ILI9340_RED);
+//        }
+//        else {
+//            tft_fillRoundRect(0, 80, 100, 14, 1, ILI9340_BLACK); // x,y,w,h,radius,color
+//            tft_setCursor(0, 80);
+//            tft_setTextColor(ILI9340_YELLOW);
+//            tft_setTextSize(2);
+//            sprintf(buffer, "%.03f Hz", modFreq);
+//            tft_writeString(buffer);
+//        }
         PT_YIELD_TIME_msec(100);
         // NEVER exit while
     } // END WHILE(1)
@@ -374,8 +374,8 @@ static PT_THREAD(protothread_cmd(struct pt *pt)) {
             PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
             sprintf(PT_send_buffer, "-- w <input>: Sets Walk Increment on Random Walk to <input>\n");
             PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
-            sprintf(PT_send_buffer, "-- m: Toggles between Text and Graphical Display Modes\n");
-            PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
+//            sprintf(PT_send_buffer, "-- m: Toggles between Text and Graphical Display Modes\n");
+//            PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
             sprintf(PT_send_buffer, "-- i: Sets and saves all parameters to default values\n");
             PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
             sprintf(PT_send_buffer, "-- s: Saves all parameters as they are currently set\n");
@@ -392,12 +392,12 @@ static PT_THREAD(protothread_cmd(struct pt *pt)) {
             PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
             sprintf(PT_send_buffer, "-- w: %f\n", SETTINGS.WALK_INCR);
             PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
-            if (SETTINGS.MODE) {
-                sprintf(PT_send_buffer, "-- m: Graphics\n");
-            } else {
-                sprintf(PT_send_buffer, "-- m: Text\n");
-            }
-            PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
+//            if (SETTINGS.MODE) {
+//                sprintf(PT_send_buffer, "-- m: Graphics\n");
+//            } else {
+//                sprintf(PT_send_buffer, "-- m: Text\n");
+//            }
+//            PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
         }
 
         // set upper bound on random walk
@@ -424,12 +424,12 @@ static PT_THREAD(protothread_cmd(struct pt *pt)) {
         }
 
         // Toggle between graphical and text mode
-        if (cmd[0] == 'm') {
-            SETTINGS.MODE = 1 - SETTINGS.MODE;
-            //reset the screen
-            y_pos = 0;
-            tft_fillScreen(ILI9340_BLACK);
-        }
+//        if (cmd[0] == 'm') {
+////            SETTINGS.MODE = 1 - SETTINGS.MODE;
+//            //reset the screen
+//            y_pos = 0;
+////            tft_fillScreen(ILI9340_BLACK);
+//        }
 
         // Save current parameters on Frequency Bounds
         if (cmd[0] == 's') {
@@ -494,12 +494,12 @@ void main(void) {
     PT_INIT(&pt_output);
 
     // init the display
-    tft_init_hw();
-    tft_begin();
-    tft_fillScreen(ILI9340_BLACK);
+//    tft_init_hw();
+//    tft_begin();
+//    tft_fillScreen(ILI9340_BLACK);
 
     //240x320 vertical display
-    tft_setRotation(0); // Use tft_setRotation(1) for 320x240
+//    tft_setRotation(0); // Use tft_setRotation(1) for 320x240
 
     // schedule both threads in round robin
     while (1) {
