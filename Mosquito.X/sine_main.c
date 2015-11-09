@@ -23,19 +23,6 @@
 #define INCR_CONST ((float)pow(2, 32)/SAMP_FREQ) // INCR = F_OUT * INCR_CONST
 #define ISR_1_MS (SAMP_FREQ/1000) // 1 ms in ISR Ticks
 
-// === the fixed point macros ========================================
-typedef signed int fix16;
-//multiply two fixed 16:16
-#define multfix16(a,b) ((fix16)(((( signed long long)(a))*\
-                                 (( signed long long)(b)))>>16)) 
-#define float2fix16(a) ((fix16)((a)*65536.0)) // 2^16
-#define fix2float16(a) ((float)(a)/65536.0)
-#define fix2int16(a)   ((int)((a)>>16))
-#define int2fix16(a)   ((fix16)((a)<<16))
-#define divfix16(a,b)  ((fix16)((((signed long long)(a)<<16)/(b)))) 
-#define sqrtfix16(a)   (float2fix16(sqrt(fix2float16(a)))) 
-#define absfix16(a)    abs(a)
-
 // == Flash Programming ==================================================
 #define FLASH_PAGE_SIZE_BYTES	(4096) // 4k bytes/page for PIC32
 #define FLASH_SIZE_BYTES (4*1024) // allocate 4k bytes of flash (one page)
@@ -111,10 +98,10 @@ volatile float modFreq = 0.400; //Hz
 
 // == TFT Stuff ==========================================================
 // string buffer
-char buffer[60];
-#define BOX_WIDTH  10
-#define BOX_HEIGHT  5
-static unsigned int y_pos = 0;
+//char buffer[60];
+//#define BOX_WIDTH  10
+//#define BOX_HEIGHT  5
+//static unsigned int y_pos = 0;
 
 // --- thread structures -------------------------------------------------
 // thread control structs
