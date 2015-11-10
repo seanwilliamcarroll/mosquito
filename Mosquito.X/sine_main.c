@@ -7,8 +7,6 @@
 
 // graphics libraries
 #include "config.h"
-//#include "tft_master.h"
-//#include "tft_gfx.h"
 // need for rand function
 #include <stdlib.h> 
 #include <xc.h>
@@ -96,13 +94,6 @@ volatile unsigned int value = 0,\
 // float (Never used in ISR)
 volatile float modFreq = 0.400; //Hz
 
-// == TFT Stuff ==========================================================
-// string buffer
-//char buffer[60];
-//#define BOX_WIDTH  10
-//#define BOX_HEIGHT  5
-//static unsigned int y_pos = 0;
-
 // --- thread structures -------------------------------------------------
 // thread control structs
 // note that UART input and output are threads
@@ -124,7 +115,6 @@ void flashInit() {
     SETTINGS.UPPER_BOUND = 0.800;
     SETTINGS.WALK_INCR = 0.050;
     SETTINGS.MID_BOUND = 0.400;
-    //SETTINGS.MODE = 1; //default to graphics mode
     // now that the variables have been initialized, write them to flash
     
     // First, erase the page
@@ -234,24 +224,7 @@ void __ISR(_TIMER_2_VECTOR, ipl2)T2Int(void) {
 static PT_THREAD(protothread_timer(struct pt *pt)) {
     PT_BEGIN(pt);
     while (1) {
-        // yield time 1 second
-//        if (!SETTINGS.MODE) {
-//            tft_setCursor(0, 0);
-//            tft_setTextColor(ILI9340_WHITE);
-//            tft_setTextSize(1);
-//            tft_writeString("Mosquito Project: Systime:\n");
-//        }
         sys_time_seconds++;
-
-        // draw sys_time
-//        if (!SETTINGS.MODE) {
-//            tft_fillRoundRect(0, 10, 100, 14, 1, ILI9340_BLACK); // x,y,w,h,radius,color
-//            tft_setCursor(0, 10);
-//            tft_setTextColor(ILI9340_YELLOW);
-//            tft_setTextSize(2);
-//            sprintf(buffer, "%d", sys_time_seconds);
-//            tft_writeString(buffer);
-//        }
         PT_YIELD_TIME_msec(1000);
         // NEVER exit while
     } // END WHILE(1)
@@ -262,15 +235,6 @@ static PT_THREAD(protothread_timer(struct pt *pt)) {
 static PT_THREAD(protothread_frequency(struct pt *pt)) {
     PT_BEGIN(pt);
     while (1) {
-//        if (!SETTINGS.MODE) {
-//            tft_setCursor(0, 50);
-//            tft_setTextColor(ILI9340_WHITE);
-//            tft_setTextSize(2);
-//            tft_writeString("Modulation Frequency\n");
-//        }
-//        if (SETTINGS.MODE) {
-//            tft_fillRect(0, y_pos, 240, BOX_HEIGHT, ILI9340_BLACK);
-//        }
         // limit the lower quarter of random walk space to 0
         modIncr = (int) (INCR_CONST * max(modFreq - SETTINGS.MID_BOUND / 2, 0));
 
@@ -294,24 +258,7 @@ static PT_THREAD(protothread_frequency(struct pt *pt)) {
         } else if (modFreq < SETTINGS.LOWER_BOUND) {
             modFreq = SETTINGS.LOWER_BOUND;
         }
-
-        // display the current AM frequency
-//        if (SETTINGS.MODE) {
-//            // draw envelope on screen
-//            tft_fillRect(120 - (120 / SETTINGS.UPPER_BOUND) * modFreq, y_pos, BOX_WIDTH, BOX_HEIGHT, ILI9340_WHITE);
-//            tft_fillRect(120 + (120 / SETTINGS.UPPER_BOUND) * modFreq, y_pos, BOX_WIDTH, BOX_HEIGHT, ILI9340_WHITE);
-//            y_pos += BOX_HEIGHT;
-//            if (y_pos >= 320) y_pos = 0;
-//            tft_fillRect(0, y_pos, 240, BOX_HEIGHT, ILI9340_RED);
-//        }
-//        else {
-//            tft_fillRoundRect(0, 80, 100, 14, 1, ILI9340_BLACK); // x,y,w,h,radius,color
-//            tft_setCursor(0, 80);
-//            tft_setTextColor(ILI9340_YELLOW);
-//            tft_setTextSize(2);
-//            sprintf(buffer, "%.03f Hz", modFreq);
-//            tft_writeString(buffer);
-//        }
+        
         PT_YIELD_TIME_msec(100);
         // NEVER exit while
     } // END WHILE(1)
