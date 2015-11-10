@@ -7,8 +7,6 @@
 
 // graphics libraries
 #include "config.h"
-//#include "tft_master.h"
-//#include "tft_gfx.h"
 // need for rand function
 #include <stdlib.h> 
 #include <xc.h>
@@ -59,18 +57,20 @@ static float cmd_value;
 #define TABLE_SIZE      (1 << TABLE_BIT_SIZE)
 #define SHIFT_AMT       (32 - TABLE_BIT_SIZE)
 // Number of harmonics to use
-#define HARMONICS                           4
+#define MAX_HARMONICS                       6
 
 
 // Random walk frequency bounds struct
 typedef struct _SYS_SETTINGS {
-    float UPPER_BOUND;
-    float LOWER_BOUND;
-    float WALK_INCR;
-    float MID_BOUND;
-    //unsigned char MODE;
-    // 0 for Text Mode
-    // 1 for Graphics Mode
+    float         UPPER_BOUND;
+    float         LOWER_BOUND;
+    float         WALK_INCR;
+    float         MID_BOUND;
+    unsigned char HARMONICS;
+    unsigned int  AMPLITUDE[MAX_HARMONICS];
+    unsigned int  NORMAL[MAX_HARMONICS];
+    unsigned int  PHASE[MAX_HARMONICS];
+    unsigned int  INCR[MAX_HARMONICS];
 } SYS_SETTINGS;
 
 SYS_SETTINGS SETTINGS;
@@ -85,23 +85,14 @@ SYS_SETTINGS SETTINGS;
 unsigned short sineTable[TABLE_SIZE];
 
 // 32 bit unsigned
-volatile unsigned int phase[HARMONICS],
-incr[HARMONICS];
+unsigned int  phase[MAX_HARMONICS];
 volatile unsigned int modPhase = 0,\
                       modIncr = 0;
-static unsigned int amplitude[HARMONICS];
 volatile unsigned int value = 0,\
                       modValue = 0;
 
 // float (Never used in ISR)
 volatile float modFreq = 0.400; //Hz
-
-// == TFT Stuff ==========================================================
-// string buffer
-//char buffer[60];
-//#define BOX_WIDTH  10
-//#define BOX_HEIGHT  5
-//static unsigned int y_pos = 0;
 
 // --- thread structures -------------------------------------------------
 // thread control structs
@@ -116,15 +107,73 @@ pt_output;
 // system 1 second interval tick
 int sys_time_seconds;
 
+void normalizeAmplitudes(){
+    SETTINGS.NORMAL[0] = SETTINGS.AMPLITUDE[0];
+    SETTINGS.NORMAL[1] = SETTINGS.AMPLITUDE[0] + 
+                         SETTINGS.AMPLITUDE[1];
+    SETTINGS.NORMAL[2] = SETTINGS.AMPLITUDE[0] +
+                         SETTINGS.AMPLITUDE[1] +
+                         SETTINGS.AMPLITUDE[2];
+    SETTINGS.NORMAL[3] = SETTINGS.AMPLITUDE[0] +
+                         SETTINGS.AMPLITUDE[1] +
+                         SETTINGS.AMPLITUDE[2] +
+                         SETTINGS.AMPLITUDE[3];
+    SETTINGS.NORMAL[4] = SETTINGS.AMPLITUDE[0] +
+                         SETTINGS.AMPLITUDE[1] +
+                         SETTINGS.AMPLITUDE[2] +
+                         SETTINGS.AMPLITUDE[3] +
+                         SETTINGS.AMPLITUDE[4];
+    SETTINGS.NORMAL[5] = SETTINGS.AMPLITUDE[0] +
+                         SETTINGS.AMPLITUDE[1] +
+                         SETTINGS.AMPLITUDE[2] +
+                         SETTINGS.AMPLITUDE[3] +
+                         SETTINGS.AMPLITUDE[4] +
+                         SETTINGS.AMPLITUDE[5];
+}
+
+void initPhase(){
+    int i = 0;
+    for (i = 0; i < MAX_HARMONICS; i++){
+        phase[i] = SETTINGS.PHASE[i];
+    }
+}
+
 // Function to Initialize All Parameters after Program being Flashed
 // should only be called once after a flash
 void flashInit() {
     // This is the first time through and the memory has not been initialized yet, so... do it
     SETTINGS.LOWER_BOUND = 0.000;
     SETTINGS.UPPER_BOUND = 0.800;
-    SETTINGS.WALK_INCR = 0.050;
-    SETTINGS.MID_BOUND = 0.400;
-    //SETTINGS.MODE = 1; //default to graphics mode
+    SETTINGS.WALK_INCR =   0.050;
+    SETTINGS.MID_BOUND =   0.400;
+    SETTINGS.HARMONICS =   4;
+    
+    // initialize phases and frequency increments for wing tones
+    SETTINGS.PHASE[0] = 0x00000000; // phase of  0
+    SETTINGS.PHASE[1] = 0x80000000; // phase of pi
+    SETTINGS.PHASE[2] = 0x80000000; // phase of pi
+    SETTINGS.PHASE[3] = 0x00000000; // phase of  0
+    SETTINGS.PHASE[4] = 0x00000000;
+    SETTINGS.PHASE[5] = 0x80000000;
+    initPhase();
+
+    SETTINGS.INCR[0] = INCR_CONST * 464;
+    SETTINGS.INCR[1] = INCR_CONST * 929;
+    SETTINGS.INCR[2] = INCR_CONST * 1391;
+    SETTINGS.INCR[3] = INCR_CONST * 1856;
+    SETTINGS.INCR[4] = INCR_CONST * 2320;
+    SETTINGS.INCR[5] = INCR_CONST * 2784;
+
+    // amplitudes
+    SETTINGS.AMPLITUDE[0] = 6762;
+    SETTINGS.AMPLITUDE[1] = 1515;
+    SETTINGS.AMPLITUDE[2] = 1301;
+    SETTINGS.AMPLITUDE[3] =  242;
+    SETTINGS.AMPLITUDE[4] =  121;
+    SETTINGS.AMPLITUDE[5] =   59;
+    
+    //normalize amplitudes
+    normalizeAmplitudes();
     // now that the variables have been initialized, write them to flash
     
     // First, erase the page
@@ -198,11 +247,12 @@ void __ISR(_TIMER_2_VECTOR, ipl2)T2Int(void) {
     value = 0;
 
     // generate combination of wing tones
-    for (i = 0; i < HARMONICS; i++) {
-        phase[i] = phase[i] + incr[i];
+    for (i = 0; i < SETTINGS.HARMONICS; i++) {
+        phase[i] = phase[i] + SETTINGS.INCR[i];
         // add each successive amplitude multiplied by its weighting
         value = value + \
-                ((amplitude[i] * sineTable[phase[i] >> SHIFT_AMT]) / 10000);
+                ((SETTINGS.AMPLITUDE[i] * sineTable[SETTINGS.PHASE[i] >> SHIFT_AMT]) / 
+                  SETTINGS.NORMAL[SETTINGS.HARMONICS-1]);
     }
 
     // generate modulation frequency
@@ -234,24 +284,8 @@ void __ISR(_TIMER_2_VECTOR, ipl2)T2Int(void) {
 static PT_THREAD(protothread_timer(struct pt *pt)) {
     PT_BEGIN(pt);
     while (1) {
-        // yield time 1 second
-//        if (!SETTINGS.MODE) {
-//            tft_setCursor(0, 0);
-//            tft_setTextColor(ILI9340_WHITE);
-//            tft_setTextSize(1);
-//            tft_writeString("Mosquito Project: Systime:\n");
-//        }
         sys_time_seconds++;
 
-        // draw sys_time
-//        if (!SETTINGS.MODE) {
-//            tft_fillRoundRect(0, 10, 100, 14, 1, ILI9340_BLACK); // x,y,w,h,radius,color
-//            tft_setCursor(0, 10);
-//            tft_setTextColor(ILI9340_YELLOW);
-//            tft_setTextSize(2);
-//            sprintf(buffer, "%d", sys_time_seconds);
-//            tft_writeString(buffer);
-//        }
         PT_YIELD_TIME_msec(1000);
         // NEVER exit while
     } // END WHILE(1)
@@ -262,15 +296,6 @@ static PT_THREAD(protothread_timer(struct pt *pt)) {
 static PT_THREAD(protothread_frequency(struct pt *pt)) {
     PT_BEGIN(pt);
     while (1) {
-//        if (!SETTINGS.MODE) {
-//            tft_setCursor(0, 50);
-//            tft_setTextColor(ILI9340_WHITE);
-//            tft_setTextSize(2);
-//            tft_writeString("Modulation Frequency\n");
-//        }
-//        if (SETTINGS.MODE) {
-//            tft_fillRect(0, y_pos, 240, BOX_HEIGHT, ILI9340_BLACK);
-//        }
         // limit the lower quarter of random walk space to 0
         modIncr = (int) (INCR_CONST * max(modFreq - SETTINGS.MID_BOUND / 2, 0));
 
@@ -295,23 +320,6 @@ static PT_THREAD(protothread_frequency(struct pt *pt)) {
             modFreq = SETTINGS.LOWER_BOUND;
         }
 
-        // display the current AM frequency
-//        if (SETTINGS.MODE) {
-//            // draw envelope on screen
-//            tft_fillRect(120 - (120 / SETTINGS.UPPER_BOUND) * modFreq, y_pos, BOX_WIDTH, BOX_HEIGHT, ILI9340_WHITE);
-//            tft_fillRect(120 + (120 / SETTINGS.UPPER_BOUND) * modFreq, y_pos, BOX_WIDTH, BOX_HEIGHT, ILI9340_WHITE);
-//            y_pos += BOX_HEIGHT;
-//            if (y_pos >= 320) y_pos = 0;
-//            tft_fillRect(0, y_pos, 240, BOX_HEIGHT, ILI9340_RED);
-//        }
-//        else {
-//            tft_fillRoundRect(0, 80, 100, 14, 1, ILI9340_BLACK); // x,y,w,h,radius,color
-//            tft_setCursor(0, 80);
-//            tft_setTextColor(ILI9340_YELLOW);
-//            tft_setTextSize(2);
-//            sprintf(buffer, "%.03f Hz", modFreq);
-//            tft_writeString(buffer);
-//        }
         PT_YIELD_TIME_msec(100);
         // NEVER exit while
     } // END WHILE(1)
@@ -322,6 +330,7 @@ static PT_THREAD(protothread_frequency(struct pt *pt)) {
 // The serial interface
 static PT_THREAD(protothread_cmd(struct pt *pt)) {
     PT_BEGIN(pt);
+    static int i = 0;
     while (1) {
         // send the prompt via DMA to serial
         sprintf(PT_send_buffer, "cmd>");
@@ -355,14 +364,20 @@ static PT_THREAD(protothread_cmd(struct pt *pt)) {
             PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
             sprintf(PT_send_buffer, "-- p: Prints current parameters\n");
             PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
-            sprintf(PT_send_buffer, "-- u <input>: Sets Upper Bound on Random Walk to <input>\n");
+            sprintf(PT_send_buffer, "-- u <float input>: Sets Upper Bound on Random Walk to <input>\n");
             PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
-            sprintf(PT_send_buffer, "-- l <input>: Sets Lower Bound on Random Walk to <input>\n");
+            sprintf(PT_send_buffer, "-- l <float input>: Sets Lower Bound on Random Walk to <input>\n");
             PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
-            sprintf(PT_send_buffer, "-- w <input>: Sets Walk Increment on Random Walk to <input>\n");
+            sprintf(PT_send_buffer, "-- w <float input>: Sets Walk Increment ");
             PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
-//            sprintf(PT_send_buffer, "-- m: Toggles between Text and Graphical Display Modes\n");
-//            PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
+            sprintf(PT_send_buffer, "on Random Walk to <input>\n");
+            PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
+            sprintf(PT_send_buffer, "-- n <int input>: Sets number of harmonics to [1..6]\n");
+            PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
+            sprintf(PT_send_buffer, "-- a: Set the amplitude weighting of a specific harmonic\n");
+            PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
+            sprintf(PT_send_buffer, "-- d: Set the phase of a specific harmonic\n");
+            PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
             sprintf(PT_send_buffer, "-- i: Sets and saves all parameters to default values\n");
             PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
             sprintf(PT_send_buffer, "-- s: Saves all parameters as they are currently set\n");
@@ -379,12 +394,24 @@ static PT_THREAD(protothread_cmd(struct pt *pt)) {
             PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
             sprintf(PT_send_buffer, "-- w: %f\n", SETTINGS.WALK_INCR);
             PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
-//            if (SETTINGS.MODE) {
-//                sprintf(PT_send_buffer, "-- m: Graphics\n");
-//            } else {
-//                sprintf(PT_send_buffer, "-- m: Text\n");
-//            }
-//            PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
+            sprintf(PT_send_buffer, "-- n: %d\n", SETTINGS.HARMONICS);
+            PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
+            sprintf(PT_send_buffer, "-- a: \n");
+            PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
+            for (i = 0; i < MAX_HARMONICS; i++){
+                sprintf(PT_send_buffer, "---- %d: %f\n",i+1, 
+                    ((SETTINGS.HARMONICS > (i)) ?
+                        (float)SETTINGS.AMPLITUDE[i]/
+                        ((float)SETTINGS.NORMAL[SETTINGS.HARMONICS-1]) : 
+                        0.0) );
+                PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
+            }
+            sprintf(PT_send_buffer, "-- d: \n");
+            PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
+            for (i = 0; i < MAX_HARMONICS; i++){
+                sprintf(PT_send_buffer, "---- %d: 0x%08x\n", i+1, SETTINGS.PHASE[i]);
+                PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
+            }
         }
 
         // set upper bound on random walk
@@ -404,19 +431,21 @@ static PT_THREAD(protothread_cmd(struct pt *pt)) {
             SETTINGS.WALK_INCR = cmd_value;
         }
 
+        // set harmonics t be in [1..6]
+        if (cmd[0] == 'n') {
+            int val = (int)cmd_value;
+            if (val > 0 && val <= 6) SETTINGS.HARMONICS = val;
+            else {
+                sprintf(PT_send_buffer, "ERROR: Input value must be an int in [1..6]\n");
+                PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
+            }
+        }
+
         // Initialize memory for Frequency Bounds on random walk if not set yet
         if (cmd[0] == 'i') {
             flashInit();
             memcpy(&SETTINGS, FLASH_BASE, sizeof (SETTINGS));
         }
-
-        // Toggle between graphical and text mode
-//        if (cmd[0] == 'm') {
-////            SETTINGS.MODE = 1 - SETTINGS.MODE;
-//            //reset the screen
-//            y_pos = 0;
-////            tft_fillScreen(ILI9340_BLACK);
-//        }
 
         // Save current parameters on Frequency Bounds
         if (cmd[0] == 's') {
@@ -448,24 +477,13 @@ void main(void) {
     
     //recall parameters saved in flash memory
     memcpy(&SETTINGS, FLASH_BASE, sizeof (SETTINGS));
-
-    // initialize phases and frequency increments for wing tones
-    phase[0] = 0x00000000; // phase of  0
-    phase[1] = 0x80000000; // phase of pi
-    phase[2] = 0x80000000; // phase of pi
-    phase[3] = 0x00000000; // phase of  0
-
-    incr[0] = INCR_CONST * 464;
-    incr[1] = INCR_CONST * 929;
-    incr[2] = INCR_CONST * 1391;
-    incr[3] = INCR_CONST * 1856;
-
-    // amplitudes must add up to 10000
-    amplitude[0] = 6886;
-    amplitude[1] = 1543;
-    amplitude[2] = 1325;
-    amplitude[3] = 246;
-
+    
+    // safety on flashing
+    if (SETTINGS.HARMONICS < 0 || SETTINGS.HARMONICS > 6)
+        flashInit();
+    
+    initPhase();
+    
     // setup the interrupt timer
     initTimers();
 
@@ -479,14 +497,6 @@ void main(void) {
     PT_INIT(&pt_input);
     PT_INIT(&pt_DMA_output);
     PT_INIT(&pt_output);
-
-    // init the display
-//    tft_init_hw();
-//    tft_begin();
-//    tft_fillScreen(ILI9340_BLACK);
-
-    //240x320 vertical display
-//    tft_setRotation(0); // Use tft_setRotation(1) for 320x240
 
     // schedule both threads in round robin
     while (1) {
