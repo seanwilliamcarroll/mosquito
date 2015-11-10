@@ -7,6 +7,8 @@
 
 // graphics libraries
 #include "config.h"
+//#include "tft_gfx.h"
+//#include "tft_master.h"
 // need for rand function
 #include <stdlib.h> 
 #include <xc.h>
