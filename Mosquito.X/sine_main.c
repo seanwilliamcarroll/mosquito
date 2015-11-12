@@ -409,7 +409,7 @@ static PT_THREAD(protothread_cmd(struct pt *pt)) {
             sprintf(PT_send_buffer, "-- d: \n");
             PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
             for (i = 0; i < MAX_HARMONICS; i++){
-                sprintf(PT_send_buffer, "---- %d: 0x%08x\n", i+1, SETTINGS.PHASE[i]);
+//                sprintf(PT_send_buffer, "---- %d: %3d\n", i+1, 180.0*(SETTINGS.PHASE[i]/0x8000000));
                 PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
             }
         }
@@ -502,7 +502,7 @@ void main(void) {
     while (1) {
         PT_SCHEDULE(protothread_timer(&pt_timer));
         PT_SCHEDULE(protothread_frequency(&pt_frequency));
-        PT_SCHEDULE(protothread_cmd(&pt_cmd));
+        //PT_SCHEDULE(protothread_cmd(&pt_cmd));
     }
 } // end main
 
