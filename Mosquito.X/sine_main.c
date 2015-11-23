@@ -52,13 +52,16 @@ static float cmd_value;
 static int param;
 
 // A-channel, 1x, active
-#define DAC_config_chan_A  0b0011000000000000
+#define DAC_config_chan_A (0b0011000000000000)
 // Sine Table Size
-#define TABLE_BIT_SIZE                      8 
+#define TABLE_BIT_SIZE                     (8) 
 #define TABLE_SIZE      (1 << TABLE_BIT_SIZE)
 #define SHIFT_AMT       (32 - TABLE_BIT_SIZE)
 // Number of harmonics to use
-#define MAX_HARMONICS                       6
+#define MAX_HARMONICS                      (6)
+#define MAX_PHASE               (2147483648.0) // 0x80000000
+#define FUNDAMENTAL_FREQ                 (464)
+#define TWO_PI                        (6.2832)
 
 
 // Random walk frequency bounds struct
@@ -131,9 +134,9 @@ void normalizeAmplitudes(){
                          SETTINGS.AMPLITUDE[3] +
                          SETTINGS.AMPLITUDE[4] +
                          SETTINGS.AMPLITUDE[5];
-//    for (j = 0; j < MAX_HARMONICS; j++){
-//        SETTINGS.NORMAL[j] = max(SETTINGS.NORMAL[j], 1);
-//    }
+    for (j = 0; j < MAX_HARMONICS; j++){
+        if (SETTINGS.NORMAL[j] == 0) SETTINGS.NORMAL[j] = 1;
+    }
 }
 
 void initPhase(){
@@ -154,24 +157,24 @@ void flashInit() {
     SETTINGS.HARMONICS =   4;
     
     // initialize phases and frequency increments for wing tones
-    SETTINGS.PHASE[0] = 0x00000000; // phase of  0
-    SETTINGS.PHASE[1] = 0x80000000; // phase of pi
-    SETTINGS.PHASE[2] = 0x80000000; // phase of pi
-    SETTINGS.PHASE[3] = 0x00000000; // phase of  0
-    SETTINGS.PHASE[4] = 0x00000000;
-    SETTINGS.PHASE[5] = 0x80000000;
+    SETTINGS.PHASE[0] =         0; // phase of  0
+    SETTINGS.PHASE[1] = MAX_PHASE; // phase of pi
+    SETTINGS.PHASE[2] = MAX_PHASE; // phase of pi
+    SETTINGS.PHASE[3] =         0; // phase of  0
+    SETTINGS.PHASE[4] =         0;
+    SETTINGS.PHASE[5] = MAX_PHASE;
     initPhase();
 
-    SETTINGS.INCR[0] = INCR_CONST * 464;
-    SETTINGS.INCR[1] = INCR_CONST * 929;
-    SETTINGS.INCR[2] = INCR_CONST * 1391;
-    SETTINGS.INCR[3] = INCR_CONST * 1856;
-    SETTINGS.INCR[4] = INCR_CONST * 2320;
-    SETTINGS.INCR[5] = INCR_CONST * 2784;
+    SETTINGS.INCR[0] = INCR_CONST * FUNDAMENTAL_FREQ * 1;
+    SETTINGS.INCR[1] = INCR_CONST * FUNDAMENTAL_FREQ * 2;
+    SETTINGS.INCR[2] = INCR_CONST * FUNDAMENTAL_FREQ * 3;
+    SETTINGS.INCR[3] = INCR_CONST * FUNDAMENTAL_FREQ * 4;
+    SETTINGS.INCR[4] = INCR_CONST * FUNDAMENTAL_FREQ * 5;
+    SETTINGS.INCR[5] = INCR_CONST * FUNDAMENTAL_FREQ * 6;
 
     // amplitudes
-    SETTINGS.AMPLITUDE[0] = 6762;
-    SETTINGS.AMPLITUDE[1] = 1515;
+    SETTINGS.AMPLITUDE[0] = 6762; // arbitrary weightings of each harmonic
+    SETTINGS.AMPLITUDE[1] = 1515; //   based on FFT analysis of flight tones
     SETTINGS.AMPLITUDE[2] = 1301;
     SETTINGS.AMPLITUDE[3] =  242;
     SETTINGS.AMPLITUDE[4] =  121;
@@ -226,7 +229,7 @@ inline void writeDAC(unsigned short data) {
 void generateTables(void) {
     unsigned int i;
     for (i = 0; i < TABLE_SIZE; i++) {
-        sineTable[i] = (short) (2047.0 * sin(6.2832 * ((float) i) / (float) TABLE_SIZE));
+        sineTable[i] = (short) (2047.0 * sin(TWO_PI * ((float) i) / (float) TABLE_SIZE));
         sineTable[i] = sineTable[i] + 2047;
     }
 }
@@ -291,7 +294,6 @@ static PT_THREAD(protothread_timer(struct pt *pt)) {
     PT_BEGIN(pt);
     while (1) {
         sys_time_seconds++;
-
         PT_YIELD_TIME_msec(1000);
         // NEVER exit while
     } // END WHILE(1)
@@ -422,7 +424,7 @@ static PT_THREAD(protothread_cmd(struct pt *pt)) {
             PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
             for (cmd_i = 0; cmd_i < MAX_HARMONICS; cmd_i++){
                 sprintf(PT_send_buffer, "---- %d: %6.02f\n", cmd_i+1, 
-                        180.0*((float)SETTINGS.PHASE[cmd_i]/2147483648.0));
+                        180.0*((float)SETTINGS.PHASE[cmd_i]/MAX_PHASE));
                 PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
             }
         }
@@ -460,9 +462,11 @@ static PT_THREAD(protothread_cmd(struct pt *pt)) {
             val = (int)cmd_value;
             if (val > 0 && val <= MAX_HARMONICS){
                 SETTINGS.AMPLITUDE[val-1] = (unsigned int)param;
+                // reset normalization values
                 normalizeAmplitudes();
                 sprintf(PT_send_buffer, "-- a: \n");
                 PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
+                // reset all phases to their new initial values
                 initPhase();
                 for (cmd_i = 0; cmd_i < MAX_HARMONICS; cmd_i++){
                     sprintf(PT_send_buffer, "---- %d: %f\n",cmd_i+1, 
@@ -479,12 +483,13 @@ static PT_THREAD(protothread_cmd(struct pt *pt)) {
             }
         }
 
-        // set amplitude weighting of a specific harmonic 
+        // set phase of a specific harmonic 
         if (cmd[0] == 'd') {
             static int val;
             val = (int)cmd_value;
             if (val > 1 && val <= MAX_HARMONICS && param >= 0 && param <= 180){
                 SETTINGS.PHASE[val-1] = (unsigned int)param * 11930465;
+                // reset all phases to their new initial values
                 initPhase();
                 sprintf(PT_send_buffer, "-- d: \n");
                 PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
@@ -539,7 +544,7 @@ void main(void) {
     //recall parameters saved in flash memory
     memcpy(&SETTINGS, FLASH_BASE, sizeof (SETTINGS));
     
-    // safety on flashing
+    // safety on flashing, not executed between resets
     if (SETTINGS.HARMONICS < 0 || SETTINGS.HARMONICS > 6)
         flashInit();
     
