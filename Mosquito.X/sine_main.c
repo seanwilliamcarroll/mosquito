@@ -280,7 +280,6 @@ void __ISR(_TIMER_2_VECTOR, ipl2)T2Int(void) {
     // output to DAC
     writeDAC(value & 0xfff);
 
-    mPORTAToggleBits(BIT_0);
     mT2ClearIntFlag();
 }
 
@@ -294,6 +293,7 @@ static PT_THREAD(protothread_timer(struct pt *pt)) {
     PT_BEGIN(pt);
     while (1) {
         sys_time_seconds++;
+        mPORTAToggleBits(BIT_0);
         PT_YIELD_TIME_msec(1000);
         // NEVER exit while
     } // END WHILE(1)
@@ -517,7 +517,7 @@ static PT_THREAD(protothread_cmd(struct pt *pt)) {
         if (cmd[0] == 's') {
             saveParameters();
         }
-
+       
         //reset the command buffer
         sprintf(cmd, "");
         // never exit while
@@ -563,6 +563,10 @@ void main(void) {
     PT_INIT(&pt_input);
     PT_INIT(&pt_DMA_output);
     PT_INIT(&pt_output);
+    
+    // Initialize Blinking Power LED
+    mPORTAClearBits(BIT_0);
+    mPORTASetPinsDigitalOut(BIT_0);
 
     // schedule both threads in round robin
     while (1) {
