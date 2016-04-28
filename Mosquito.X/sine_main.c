@@ -354,7 +354,7 @@ static PT_THREAD(protothread_cmd(struct pt *pt)) {
         // in this case, when <enter> is pushed
         // now parse the string
         cmd_value = -1;
-        param =  0;
+        param =  -1;
         sscanf(PT_term_buffer, "%s %f %d", cmd, &cmd_value, &param);
         // reset the send buffer
         sprintf(PT_send_buffer, "");
@@ -430,24 +430,24 @@ static PT_THREAD(protothread_cmd(struct pt *pt)) {
         }
 
         // set upper bound on random walk
-        if (cmd[0] == 'u') {
+        if (cmd[0] == 'u' && cmd_value != -1) {
             SETTINGS.UPPER_BOUND = cmd_value;
             SETTINGS.MID_BOUND = (SETTINGS.UPPER_BOUND - SETTINGS.LOWER_BOUND) / 2;
         }
 
         // set lower bound on random walk
-        if (cmd[0] == 'l') {
+        if (cmd[0] == 'l' && cmd_value != -1) {
             SETTINGS.LOWER_BOUND = cmd_value;
             SETTINGS.MID_BOUND = (SETTINGS.UPPER_BOUND - SETTINGS.LOWER_BOUND) / 2;
         }
 
         // set walk increment on random walk
-        if (cmd[0] == 'w') {
+        if (cmd[0] == 'w' && cmd_value != -1) {
             SETTINGS.WALK_INCR = cmd_value;
         }
 
         // set harmonics t be in [1..6]
-        if (cmd[0] == 'n') {
+        if (cmd[0] == 'n' && cmd_value != -1) {
             int val = (int)cmd_value;
             if (val > 0 && val <= MAX_HARMONICS) SETTINGS.HARMONICS = val;
             else {
@@ -457,7 +457,7 @@ static PT_THREAD(protothread_cmd(struct pt *pt)) {
         }
 
         // set amplitude weighting of a specific harmonic 
-        if (cmd[0] == 'a') {
+        if (cmd[0] == 'a' && cmd_value != -1 && param != -1) {
             static int val;
             val = (int)cmd_value;
             if (val > 0 && val <= MAX_HARMONICS){
@@ -484,7 +484,7 @@ static PT_THREAD(protothread_cmd(struct pt *pt)) {
         }
 
         // set phase of a specific harmonic 
-        if (cmd[0] == 'd') {
+        if (cmd[0] == 'd' && cmd_value != -1 && param != -1) {
             static int val;
             val = (int)cmd_value;
             if (val > 1 && val <= MAX_HARMONICS && param >= 0 && param <= 180){
