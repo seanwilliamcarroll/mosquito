@@ -60,16 +60,13 @@ static int param;
 // Number of harmonics to use
 #define MAX_HARMONICS                      (6)
 #define MAX_PHASE               (2147483648.0) // 0x80000000
-#define FUNDAMENTAL_FREQ                 (464)
+#define DEFAULT_FUNDAMENTAL_FREQ         (464)
 #define TWO_PI                        (6.2832)
 
 
-// Random walk frequency bounds struct
+// System settings struct, using in storing to flash
 typedef struct _SYS_SETTINGS {
-    float         UPPER_BOUND;
-    float         LOWER_BOUND;
-    float         WALK_INCR;
-    float         MID_BOUND;
+    int           FUNDAMENTAL;
     unsigned char HARMONICS;
     unsigned int  AMPLITUDE[MAX_HARMONICS];
     unsigned int  NORMAL[MAX_HARMONICS];
@@ -90,13 +87,10 @@ unsigned short sineTable[TABLE_SIZE];
 
 // 32 bit unsigned
 volatile unsigned int phase[MAX_HARMONICS];
-volatile unsigned int modPhase = 0,\
-                      modIncr = 0;
-volatile unsigned int value = 0,\
-                      modValue = 0;
+volatile unsigned int value = 0;
 
-// float (Never used in ISR)
-volatile float modFreq = 0.400; //Hz
+// Sound on flag
+volatile unsigned char sound_on = 1;
 
 // --- thread structures -------------------------------------------------
 // thread control structs
@@ -110,6 +104,15 @@ pt_output;
 
 // system 1 second interval tick
 int sys_time_seconds;
+
+void recalculateHarmonics(){
+    SETTINGS.INCR[0] = INCR_CONST * SETTINGS.FUNDAMENTAL * 1;
+    SETTINGS.INCR[1] = INCR_CONST * SETTINGS.FUNDAMENTAL * 2;
+    SETTINGS.INCR[2] = INCR_CONST * SETTINGS.FUNDAMENTAL * 3;
+    SETTINGS.INCR[3] = INCR_CONST * SETTINGS.FUNDAMENTAL * 4;
+    SETTINGS.INCR[4] = INCR_CONST * SETTINGS.FUNDAMENTAL * 5;
+    SETTINGS.INCR[5] = INCR_CONST * SETTINGS.FUNDAMENTAL * 6;
+}
 
 void normalizeAmplitudes(){
     int j = 0;
@@ -150,11 +153,8 @@ void initPhase(){
 // should only be called once after a flash
 void flashInit() {
     // This is the first time through and the memory has not been initialized yet, so... do it
-    SETTINGS.LOWER_BOUND = 0.000;
-    SETTINGS.UPPER_BOUND = 0.800;
-    SETTINGS.WALK_INCR =   0.050;
-    SETTINGS.MID_BOUND =   0.400;
-    SETTINGS.HARMONICS =   4;
+    SETTINGS.FUNDAMENTAL = DEFAULT_FUNDAMENTAL_FREQ;
+    SETTINGS.HARMONICS   =                        5;
     
     // initialize phases and frequency increments for wing tones
     SETTINGS.PHASE[0] =         0; // phase of  0
@@ -165,12 +165,12 @@ void flashInit() {
     SETTINGS.PHASE[5] = MAX_PHASE;
     initPhase();
 
-    SETTINGS.INCR[0] = INCR_CONST * FUNDAMENTAL_FREQ * 1;
-    SETTINGS.INCR[1] = INCR_CONST * FUNDAMENTAL_FREQ * 2;
-    SETTINGS.INCR[2] = INCR_CONST * FUNDAMENTAL_FREQ * 3;
-    SETTINGS.INCR[3] = INCR_CONST * FUNDAMENTAL_FREQ * 4;
-    SETTINGS.INCR[4] = INCR_CONST * FUNDAMENTAL_FREQ * 5;
-    SETTINGS.INCR[5] = INCR_CONST * FUNDAMENTAL_FREQ * 6;
+    SETTINGS.INCR[0] = INCR_CONST * SETTINGS.FUNDAMENTAL * 1;
+    SETTINGS.INCR[1] = INCR_CONST * SETTINGS.FUNDAMENTAL * 2;
+    SETTINGS.INCR[2] = INCR_CONST * SETTINGS.FUNDAMENTAL * 3;
+    SETTINGS.INCR[3] = INCR_CONST * SETTINGS.FUNDAMENTAL * 4;
+    SETTINGS.INCR[4] = INCR_CONST * SETTINGS.FUNDAMENTAL * 5;
+    SETTINGS.INCR[5] = INCR_CONST * SETTINGS.FUNDAMENTAL * 6;
 
     // amplitudes
     SETTINGS.AMPLITUDE[0] = 6762; // arbitrary weightings of each harmonic
@@ -264,19 +264,6 @@ void __ISR(_TIMER_2_VECTOR, ipl2)T2Int(void) {
                   SETTINGS.NORMAL[SETTINGS.HARMONICS-1]);
     }
 
-    // generate modulation frequency
-    modPhase = modPhase + modIncr;
-    modValue = sineTable[modPhase >> SHIFT_AMT];
-
-    // remove dc offset
-    value = value - 2047;
-
-    // AM Modulation
-    value = (modValue * value) >> 12;
-
-    // add dc offset back in
-    value = value + 2047;
-
     // output to DAC
     writeDAC(value & 0xfff);
 
@@ -304,30 +291,6 @@ static PT_THREAD(protothread_timer(struct pt *pt)) {
 static PT_THREAD(protothread_frequency(struct pt *pt)) {
     PT_BEGIN(pt);
     while (1) {
-        // limit the lower quarter of random walk space to 0
-        modIncr = (int) (INCR_CONST * max(modFreq - SETTINGS.MID_BOUND / 2, 0));
-
-        //random walk the modulation freq
-
-        //Random walk
-        int r = rand();
-        if (r < (7 * (RAND_MAX / 20))) {
-            modFreq += SETTINGS.WALK_INCR;
-        } else if (r < 14 * (RAND_MAX / 20)) {
-            modFreq -= SETTINGS.WALK_INCR;
-        } else if (r < 17 * (RAND_MAX / 20)) {
-            modFreq += 3 * SETTINGS.WALK_INCR;
-        } else {
-            modFreq -= 3 * SETTINGS.WALK_INCR;
-        }
-
-        //bound the walk by lower and upper frequency bounds
-        if (modFreq > SETTINGS.UPPER_BOUND) {
-            modFreq = SETTINGS.UPPER_BOUND;
-        } else if (modFreq < SETTINGS.LOWER_BOUND) {
-            modFreq = SETTINGS.LOWER_BOUND;
-        }
-
         PT_YIELD_TIME_msec(100);
         // NEVER exit while
     } // END WHILE(1)
@@ -374,24 +337,6 @@ static PT_THREAD(protothread_cmd(struct pt *pt)) {
             PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
             sprintf(PT_send_buffer, "-- p: Prints current parameters\n");
             PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
-            sprintf(PT_send_buffer, "-- u <float input>: Sets Upper Bound on Random Walk to <input>\n");
-            PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
-            sprintf(PT_send_buffer, "-- l <float input>: Sets Lower Bound on Random Walk to <input>\n");
-            PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
-            sprintf(PT_send_buffer, "-- w <float input>: Sets Walk Increment ");
-            PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
-            sprintf(PT_send_buffer, "on Random Walk to <input>\n");
-            PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
-            sprintf(PT_send_buffer, "-- n <int input>: Sets number of harmonics to [1..6]\n");
-            PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
-            sprintf(PT_send_buffer, "-- a <int [1..6]> <int>: Set the amplitude weighting to <int>");
-            PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
-            sprintf(PT_send_buffer, "\n      of harmonic <int [1..6]>\n");
-            PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
-            sprintf(PT_send_buffer, "-- d <int [2..6]> <int[0..180]>: Set the phase  to <int[0..180]>");
-            PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
-            sprintf(PT_send_buffer, "\n      of harmonic <int [1..6]>\n");
-            PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
             sprintf(PT_send_buffer, "-- i: Sets and saves all parameters to default values\n");
             PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
             sprintf(PT_send_buffer, "-- s: Saves all parameters as they are currently set\n");
@@ -402,111 +347,8 @@ static PT_THREAD(protothread_cmd(struct pt *pt)) {
         if (cmd[0] == 'p') {
             sprintf(PT_send_buffer, "Parameters:\n");
             PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
-            sprintf(PT_send_buffer, "-- u: %f\n", SETTINGS.UPPER_BOUND);
-            PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
-            sprintf(PT_send_buffer, "-- l: %f\n", SETTINGS.LOWER_BOUND);
-            PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
-            sprintf(PT_send_buffer, "-- w: %f\n", SETTINGS.WALK_INCR);
-            PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
-            sprintf(PT_send_buffer, "-- n: %d\n", SETTINGS.HARMONICS);
-            PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
-            sprintf(PT_send_buffer, "-- a: \n");
-            PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
-            for (cmd_i = 0; cmd_i < MAX_HARMONICS; cmd_i++){
-                sprintf(PT_send_buffer, "---- %d: %f\n",cmd_i+1, 
-                    ((SETTINGS.HARMONICS > (cmd_i)) ?
-                        (float)SETTINGS.AMPLITUDE[cmd_i]/
-                        ((float)SETTINGS.NORMAL[SETTINGS.HARMONICS-1]) : 
-                        0.0) );
-                PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
-            }
-            sprintf(PT_send_buffer, "-- d: \n");
-            PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
-            for (cmd_i = 0; cmd_i < MAX_HARMONICS; cmd_i++){
-                sprintf(PT_send_buffer, "---- %d: %6.02f\n", cmd_i+1, 
-                        180.0*((float)SETTINGS.PHASE[cmd_i]/MAX_PHASE));
-                PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
-            }
         }
-
-        // set upper bound on random walk
-        if (cmd[0] == 'u') {
-            SETTINGS.UPPER_BOUND = cmd_value;
-            SETTINGS.MID_BOUND = (SETTINGS.UPPER_BOUND - SETTINGS.LOWER_BOUND) / 2;
-        }
-
-        // set lower bound on random walk
-        if (cmd[0] == 'l') {
-            SETTINGS.LOWER_BOUND = cmd_value;
-            SETTINGS.MID_BOUND = (SETTINGS.UPPER_BOUND - SETTINGS.LOWER_BOUND) / 2;
-        }
-
-        // set walk increment on random walk
-        if (cmd[0] == 'w') {
-            SETTINGS.WALK_INCR = cmd_value;
-        }
-
-        // set harmonics t be in [1..6]
-        if (cmd[0] == 'n') {
-            int val = (int)cmd_value;
-            if (val > 0 && val <= MAX_HARMONICS) SETTINGS.HARMONICS = val;
-            else {
-                sprintf(PT_send_buffer, "ERROR: Input value must be an int in [1..6]\n");
-                PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
-            }
-        }
-
-        // set amplitude weighting of a specific harmonic 
-        if (cmd[0] == 'a') {
-            static int val;
-            val = (int)cmd_value;
-            if (val > 0 && val <= MAX_HARMONICS){
-                SETTINGS.AMPLITUDE[val-1] = (unsigned int)param;
-                // reset normalization values
-                normalizeAmplitudes();
-                sprintf(PT_send_buffer, "-- a: \n");
-                PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
-                // reset all phases to their new initial values
-                initPhase();
-                for (cmd_i = 0; cmd_i < MAX_HARMONICS; cmd_i++){
-                    sprintf(PT_send_buffer, "---- %d: %f\n",cmd_i+1, 
-                        ((SETTINGS.HARMONICS > (cmd_i)) ?
-                            (float)SETTINGS.AMPLITUDE[cmd_i]/
-                            ((float)SETTINGS.NORMAL[SETTINGS.HARMONICS-1]) : 
-                            0.0) );
-                    PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
-                }
-            }
-            else {
-                sprintf(PT_send_buffer, "ERROR: Input value must be an int in [1..6]\n");
-                PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
-            }
-        }
-
-        // set phase of a specific harmonic 
-        if (cmd[0] == 'd') {
-            static int val;
-            val = (int)cmd_value;
-            if (val > 1 && val <= MAX_HARMONICS && param >= 0 && param <= 180){
-                SETTINGS.PHASE[val-1] = (unsigned int)param * 11930465;
-                // reset all phases to their new initial values
-                initPhase();
-                sprintf(PT_send_buffer, "-- d: \n");
-                PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
-                for (cmd_i = 0; cmd_i < MAX_HARMONICS; cmd_i++){
-                    sprintf(PT_send_buffer, "---- %d: %6.02f\n", cmd_i+1, 
-                            180.0*((float)SETTINGS.PHASE[cmd_i]/2147483648.0));
-                    PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
-                }
-            }
-            else {
-                sprintf(PT_send_buffer, "ERROR: Harmonic must be an int in [2..6]\n");
-                PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
-                sprintf(PT_send_buffer, "And phase must be an int in [0..180]\n");
-                PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
-            }
-        }
-        
+      
         // Initialize memory for Frequency Bounds on random walk if not set yet
         if (cmd[0] == 'i') {
             flashInit();
@@ -545,8 +387,9 @@ void main(void) {
     memcpy(&SETTINGS, FLASH_BASE, sizeof (SETTINGS));
     
     // safety on flashing, not executed between resets
-    if (SETTINGS.HARMONICS < 0 || SETTINGS.HARMONICS > 6)
+    if (SETTINGS.HARMONICS < 0 || SETTINGS.HARMONICS > 6){
         flashInit();
+    }
     
     initPhase();
     
