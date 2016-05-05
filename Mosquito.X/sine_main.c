@@ -267,7 +267,6 @@ void __ISR(_TIMER_2_VECTOR, ipl2)T2Int(void) {
     // output to DAC
     writeDAC(value & 0xfff);
 
-    mPORTAToggleBits(BIT_0);
     mT2ClearIntFlag();
 }
 
@@ -281,6 +280,7 @@ static PT_THREAD(protothread_timer(struct pt *pt)) {
     PT_BEGIN(pt);
     while (1) {
         sys_time_seconds++;
+        mPORTAToggleBits(BIT_0);
         PT_YIELD_TIME_msec(1000);
         // NEVER exit while
     } // END WHILE(1)
@@ -317,7 +317,7 @@ static PT_THREAD(protothread_cmd(struct pt *pt)) {
         // in this case, when <enter> is pushed
         // now parse the string
         cmd_value = -1;
-        param =  0;
+        param =  -1;
         sscanf(PT_term_buffer, "%s %f %d", cmd, &cmd_value, &param);
         // reset the send buffer
         sprintf(PT_send_buffer, "");
@@ -348,7 +348,7 @@ static PT_THREAD(protothread_cmd(struct pt *pt)) {
             sprintf(PT_send_buffer, "Parameters:\n");
             PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
         }
-      
+
         // Initialize memory for Frequency Bounds on random walk if not set yet
         if (cmd[0] == 'i') {
             flashInit();
@@ -359,7 +359,7 @@ static PT_THREAD(protothread_cmd(struct pt *pt)) {
         if (cmd[0] == 's') {
             saveParameters();
         }
-
+       
         //reset the command buffer
         sprintf(cmd, "");
         // never exit while
@@ -406,6 +406,10 @@ void main(void) {
     PT_INIT(&pt_input);
     PT_INIT(&pt_DMA_output);
     PT_INIT(&pt_output);
+    
+    // Initialize Blinking Power LED
+    mPORTAClearBits(BIT_0);
+    mPORTASetPinsDigitalOut(BIT_0);
 
     // schedule both threads in round robin
     while (1) {
